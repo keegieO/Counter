@@ -23,6 +23,8 @@
   video, #overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   #centerLine { position:absolute; top:0; bottom:0; left:50%; width:0; border-left:3px dashed rgba(255,216,77,.85); pointer-events:none; }
   #status { position:absolute; left:10px; right:10px; top:10px; background:rgba(0,0,0,.6); padding:8px 10px; border-radius:10px; font-size:13px; font-weight:700; text-align:center; }
+  #chip { position:absolute; left:10px; bottom:10px; background:rgba(0,0,0,.65); padding:6px 10px; border-radius:8px; font-size:13px; font-weight:800; }
+  #chip.stop { background:rgba(240,106,106,.9); color:#fff; }
   #fps { position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:8px; font-size:12px; color:var(--dim); }
   #startCover { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center; background:var(--bg); }
   #startCover p { margin:0; color:var(--dim); font-size:14px; line-height:1.45; max-width:360px; }
@@ -48,6 +50,13 @@
   .rec .n { font-size:22px; font-weight:800; text-align:right; }
   #exportBox { width:100%; height:90px; display:none; background:#0f1312; color:var(--dim); border:1px solid var(--line); border-radius:8px; font-family:ui-monospace,Menlo,monospace; font-size:11px; margin-bottom:10px; }
   #clearAll.armed { background:var(--red); color:#fff; }
+  #setPanel { position:fixed; inset:0; background:var(--bg); display:none; flex-direction:column; z-index:21; }
+  #setPanel.open { display:flex; }
+  .sl { font-size:13px; font-weight:800; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; margin:14px 0 8px; }
+  .seg { display:flex; gap:6px; } .seg button { flex:1; padding:12px 4px; border-radius:10px; border:2px solid var(--line); background:#1d2220; color:var(--dim); font-weight:800; font-size:14px; }
+  .seg button.on { background:#f3f5f4; color:#0b0d10; border-color:#f3f5f4; }
+  .hint { color:var(--dim); font-size:13px; line-height:1.4; margin:8px 0 0; }
+  input[type=range] { width:100%; } .tg { display:flex; gap:10px; align-items:center; margin-top:18px; font-weight:700; font-size:15px; } .tg input { width:22px; height:22px; }
   #toast { position:fixed; left:50%; bottom:110px; transform:translateX(-50%); background:#222826; border:1px solid var(--line); padding:10px 16px; border-radius:999px; font-size:14px; font-weight:800; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; max-width:92vw; text-align:center; }
   #toast.show { opacity:1; }
 </style>
@@ -57,6 +66,7 @@
   <header>
     <h1>Camera Car Counter</h1>
     <a class="pill" href="index.html">Tap counter</a>
+    <button class="pill" id="setBtn">⚙</button>
     <button class="pill" id="logBtn">Saved (0) ▸</button>
   </header>
   <div id="gpsBar"><span id="gpsDot"></span><span id="gpsText">GPS starts with the camera</span></div>
@@ -66,6 +76,7 @@
     <div id="centerLine"></div>
     <div id="status">Loading…</div>
     <div id="fps"></div>
+    <div id="chip"></div>
     <div id="startCover">
       <div style="font-size:20px;font-weight:800">Point the phone out the side window</div>
       <p>Mount it sideways (landscape works best) facing the curb you're counting. Each car is counted once when it passes the yellow line. Use + / − to fix misses.</p>
@@ -94,6 +105,18 @@
     <div class="row" style="margin-top:16px"><button id="clearAll">Clear all</button></div>
   </div>
 </div>
+<div id="setPanel">
+  <header><h1>Filter settings</h1><button class="pill" id="closeSet">Done</button></header>
+  <div class="pbody">
+    <div class="sl">Parked cars move across the screen</div>
+    <div class="seg" id="dirSeg"><button data-v="auto">Auto</button><button data-v="left">← Left</button><button data-v="right">Right →</button></div>
+    <p class="hint">Auto learns it in the first few cars. Anything going the other way, or keeping pace with you, is treated as traffic and skipped.</p>
+    <div class="sl">Ignore cars that look small (far lanes) — <span id="minHVal"></span></div>
+    <input type="range" id="minH" min="0.08" max="0.45" step="0.01">
+    <p class="hint">Raise it if cars across the street get counted. Lower it if parked cars get missed.</p>
+    <label class="tg"><input type="checkbox" id="pauseStopped"> Pause counting when we're stopped (lights, traffic)</label>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -111,16 +134,47 @@
   function render() { $("carN").textContent = state.cars; $("meterN").textContent = state.meters; $("logBtn").textContent = "Saved (" + state.records.length + ") ▸"; }
 
   // ---------- Tracker: each object counted once when it crosses the center line ----------
+  // Parked cars all sweep across the frame the same way at a speed tied to ours.
+  // Traffic moving with us barely moves in the frame (or goes the other way), so it's rejected.
   var VEHICLES = { car: 1, truck: 1, bus: 1, motorcycle: 1 };
-  function Tracker(onCount) { this.tracks = []; this.nextId = 1; this.onCount = onCount; }
+  var cfg = { dir: "auto", minH: 0.18, pauseStopped: true };
+  try { var c0 = JSON.parse(localStorage.getItem("cameraCfg_v1") || "null"); if (c0) for (var k0 in cfg) if (c0.hasOwnProperty(k0)) cfg[k0] = c0[k0]; } catch (e) {}
+  function saveCfg() { try { localStorage.setItem("cameraCfg_v1", JSON.stringify(cfg)); } catch (e) {} }
+  var votes = [];                  // recent crossing directions (+1 / -1)
+  var sweeps = [];                 // how fast recent parked cars crossed the frame
+  function minSweep() {            // slower than this = moving with traffic
+    if (sweeps.length < 3) return 0.3;
+    var s = sweeps.slice().sort(function (a, b) { return a - b; }), med = s[Math.floor(s.length / 2)];
+    return Math.max(0.12, 0.35 * med);
+  }
+  function flowDir() {
+    if (cfg.dir === "right") return 1; if (cfg.dir === "left") return -1;
+    if (votes.length < 3) return 0;
+    var s = votes.reduce(function (a, b) { return a + b; }, 0); return s > 0 ? 1 : s < 0 ? -1 : 0;
+  }
+  var speed = { mps: null };       // our speed from GPS
+  function stopped() { return cfg.pauseStopped && speed.mps != null && speed.mps < 1.3; }
+
+  function judge(t, minH) {        // null = count it, otherwise the reason it's skipped
+    if (stopped()) return "stopped";
+    if (t.h < minH) return "far";
+    var mv = Math.abs(t.vx);
+    if (mv < minSweep()) return "moving";                             // keeping pace with us
+    var D = flowDir(), s = t.vx > 0 ? 1 : -1;
+    if (D && s !== D) return "moving";                                 // going the wrong way through the frame
+    if (D && (t.cx - t.firstCx) * D < 0.1) return "moving";
+    return null;
+  }
+
+  function Tracker(onCount, minHFn) { this.tracks = []; this.nextId = 1; this.onCount = onCount; this.minH = minHFn; }
   Tracker.prototype.update = function (dets, now) {
-    var tracks = this.tracks, used = {};
-    var pairs = [];
+    var tracks = this.tracks, pairs = [], self = this;
     dets.forEach(function (d, di) {
       tracks.forEach(function (t, ti) {
-        var dist = Math.hypot(d.cx - t.cx, (d.cy - t.cy) * 1.5);
+        var px = t.cx + (t.hits > 1 ? t.vx * Math.min(0.5, (now - t.last) / 1000) : 0);   // where it should be now
+        var dist = Math.hypot(d.cx - px, (d.cy - t.cy) * 2.5);
         var sr = (d.w * d.h) / ((t.w * t.h) || 1e-6);
-        if (dist < 0.35 && sr > 0.3 && sr < 3.3) pairs.push({ di: di, ti: ti, dist: dist });
+        if (dist < 0.3 && sr > 0.45 && sr < 2.2) pairs.push({ di: di, ti: ti, dist: dist });
       });
     });
     pairs.sort(function (a, b) { return a.dist - b.dist; });
@@ -128,18 +182,29 @@
     pairs.forEach(function (p) {
       if (dUsed[p.di] || tUsed[p.ti]) return;
       dUsed[p.di] = tUsed[p.ti] = true;
-      var t = tracks[p.ti], d = dets[p.di], prev = t.cx;
+      var t = tracks[p.ti], d = dets[p.di], prev = t.cx, dt = Math.max(0.03, (now - t.last) / 1000);
+      var inst = (d.cx - prev) / dt;
+      t.vx = t.hits === 1 ? inst : 0.6 * t.vx + 0.4 * inst;
       t.cx = d.cx; t.cy = d.cy; t.w = d.w; t.h = d.h; t.hits++; t.last = now; t.box = d.box;
-      if (!t.counted && t.hits >= 2 && (prev - 0.5) * (t.cx - 0.5) <= 0 && prev !== t.cx) { t.counted = true; this.onCount(t); }
-    }, this);
+      if (!t.decided && t.hits >= 3 && (prev - 0.5) * (t.cx - 0.5) <= 0 && prev !== t.cx) {
+        t.decided = true;
+        var why = judge(t, self.minH());
+        if (!why) {
+          t.counted = true; self.onCount(t);
+          votes.push(t.vx > 0 ? 1 : -1); if (votes.length > 15) votes.shift();
+          sweeps.push(Math.abs(t.vx)); if (sweeps.length > 15) sweeps.shift();
+        } else t.reason = why;
+      }
+    });
     dets.forEach(function (d, di) {
       if (dUsed[di]) return;
-      tracks.push({ id: this.nextId++, cx: d.cx, cy: d.cy, w: d.w, h: d.h, hits: 1, last: now, counted: false, box: d.box });
-    }, this);
+      tracks.push({ id: self.nextId++, cx: d.cx, cy: d.cy, firstCx: d.cx, w: d.w, h: d.h, vx: 0, hits: 1, last: now, counted: false, box: d.box });
+    });
     this.tracks = tracks.filter(function (t) { return now - t.last < 1200; });
   };
-  var carTracker = new Tracker(function () { state.cars++; save(); render(); vibrate(15); });
-  var meterTracker = new Tracker(function () { state.meters++; save(); render(); vibrate([10, 30, 10]); });
+  var skipped = 0;
+  var carTracker = new Tracker(function () { state.cars++; save(); render(); vibrate(15); }, function () { return cfg.minH; });
+  var meterTracker = new Tracker(function () { state.meters++; save(); render(); vibrate([10, 30, 10]); }, function () { return 0.04; });
 
   // ---------- Camera + model ----------
   var model = null, running = false, paused = false, frames = 0, fpsT = performance.now();
@@ -178,12 +243,19 @@
         else if (p.class === "parking meter") meters.push(d);
       });
       carTracker.update(cars, now); meterTracker.update(meters, now);
-      draw(vw, vh);
+      draw(vw, vh); renderChip();
       frames++; if (now - fpsT > 1000) { fpsEl.textContent = Math.round(frames * 1000 / (now - fpsT)) + " fps"; frames = 0; fpsT = now; }
       requestAnimationFrame(loop);
     }).catch(function () { requestAnimationFrame(loop); });
   }
 
+  function renderChip() {
+    var c = $("chip"), D = flowDir();
+    if (stopped()) { c.className = "stop"; c.textContent = "Stopped — not counting (so traffic isn't counted)"; return; }
+    c.className = "";
+    var mph = speed.mps == null ? "" : " · " + Math.round(speed.mps * 2.237) + " mph";
+    c.textContent = (D ? "Parked cars move " + (D > 0 ? "→" : "←") : "Learning direction…") + (cfg.dir === "auto" ? "" : " (set)") + mph;
+  }
   function draw(vw, vh) {
     var r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
     canvas.width = r.width * dpr; canvas.height = r.height * dpr;
@@ -194,9 +266,11 @@
       tracks.forEach(function (t) {
         if (!t.box) return;
         var x = ox + t.box[0] * scale, y = oy + t.box[1] * scale, w = t.box[2] * scale, h = t.box[3] * scale;
-        ctx.lineWidth = 3; ctx.strokeStyle = t.counted ? "#5fbf72" : color; ctx.strokeRect(x, y, w, h);
-        ctx.fillStyle = t.counted ? "#5fbf72" : color; ctx.font = "bold 13px -apple-system, sans-serif";
-        ctx.fillText(label + (t.counted ? " ✓" : ""), x + 4, Math.max(14, y - 4));
+        var col = t.counted ? "#5fbf72" : t.reason ? "#8e9792" : color;
+        ctx.lineWidth = 3; ctx.strokeStyle = col; ctx.setLineDash(t.reason ? [6, 5] : []); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+        ctx.fillStyle = col; ctx.font = "bold 13px -apple-system, sans-serif";
+        var tag = t.counted ? " ✓" : t.reason === "moving" ? " · traffic, skipped" : t.reason === "far" ? " · too far" : t.reason === "stopped" ? " · stopped" : "";
+        ctx.fillText(label + tag, x + 4, Math.max(14, y - 4));
       });
     }
     boxes(carTracker.tracks, "#4fa3ff", "car"); boxes(meterTracker.tracks, "#ffb020", "meter");
@@ -227,7 +301,13 @@
   function startGps() {
     if (!navigator.geolocation) { renderGps("No GPS available"); return; }
     navigator.geolocation.watchPosition(function (p) {
-      gps.lat = p.coords.latitude; gps.lon = p.coords.longitude; gps.acc = p.coords.accuracy; renderGps();
+      var nowT = Date.now(), c = p.coords;
+      if (c.speed != null && !isNaN(c.speed) && c.speed >= 0) speed.mps = c.speed;
+      else if (gps.lat != null && gps.t && c.accuracy < 30) {
+        var dtS = (nowT - gps.t) / 1000; if (dtS > 0.5) speed.mps = distM({ lat: gps.lat, lon: gps.lon }, { lat: c.latitude, lon: c.longitude }) / dtS;
+      }
+      gps.t = nowT;
+      gps.lat = c.latitude; gps.lon = c.longitude; gps.acc = c.accuracy; renderGps();
       var here = { lat: gps.lat, lon: gps.lon }, now = Date.now();
       if (now - gps.geoT > 4000 && (!gps.geoAt || !gps.street || distM(gps.geoAt, here) > 20)) {
         gps.geoT = now; gps.geoAt = here;
@@ -286,8 +366,20 @@
     state.records = []; save(); render(); renderList(); clr.classList.remove("armed"); clr.textContent = "Clear all"; toast("Cleared");
   });
 
+  function renderSet() {
+    Array.prototype.forEach.call(document.querySelectorAll("#dirSeg button"), function (b) { b.classList.toggle("on", b.getAttribute("data-v") === cfg.dir); });
+    $("minH").value = cfg.minH; $("minHVal").textContent = Math.round(cfg.minH * 100) + "% of screen height"; $("pauseStopped").checked = !!cfg.pauseStopped;
+  }
+  $("setBtn").addEventListener("click", function () { renderSet(); $("setPanel").classList.add("open"); });
+  $("closeSet").addEventListener("click", function () { $("setPanel").classList.remove("open"); });
+  Array.prototype.forEach.call(document.querySelectorAll("#dirSeg button"), function (b) {
+    b.addEventListener("click", function () { cfg.dir = b.getAttribute("data-v"); if (cfg.dir === "auto") { votes = []; sweeps = []; } saveCfg(); renderSet(); });
+  });
+  $("minH").addEventListener("input", function () { cfg.minH = +this.value; saveCfg(); renderSet(); });
+  $("pauseStopped").addEventListener("change", function () { cfg.pauseStopped = this.checked; saveCfg(); });
+
   // test hook (used only by automated tests)
-  window.__counterTest = { carTracker: carTracker, state: state };
+  window.__counterTest = { carTracker: carTracker, state: state, speed: speed, cfg: cfg };
   render();
 })();
 </script>
