@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Camera Car Counter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <style>
@@ -59,12 +61,33 @@
   input[type=range] { width:100%; } .tg { display:flex; gap:10px; align-items:center; margin-top:18px; font-weight:700; font-size:15px; } .tg input { width:22px; height:22px; }
   #toast { position:fixed; left:50%; bottom:110px; transform:translateX(-50%); background:#222826; border:1px solid var(--line); padding:10px 16px; border-radius:999px; font-size:14px; font-weight:800; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; max-width:92vw; text-align:center; }
   #toast.show { opacity:1; }
+
+  /* cozy game theme */
+  :root { --bg:#1d1633; --panel:#261d42; --line:#3b2f62; --text:#fff6e4; --dim:#b8aed2; --hi:#7fe0a0; --gold:#ffd35c; }
+  html, body { font-family:"Nunito",-apple-system,sans-serif; font-weight:700; }
+  header { background:linear-gradient(180deg,#4a2f7a 0%,#b2557a 70%,#f19065 100%) !important; box-shadow:0 4px 0 rgba(0,0,0,.2); }
+  header h1 { font-family:"Pixelify Sans",monospace; font-size:18px !important; text-shadow:0 2px 0 rgba(0,0,0,.35); }
+  .pill { background:rgba(20,12,40,.32) !important; border:2px solid rgba(255,255,255,.22) !important; border-radius:12px !important; box-shadow:0 3px 0 rgba(0,0,0,.25); font-weight:900 !important; }
+  .counts, footer { background:rgba(38,29,66,.95) !important; }
+  .cbox { border-radius:16px !important; border:2px solid var(--line) !important; background:#2d2350 !important; box-shadow:0 5px 0 #150e2b; }
+  .cbox .n { font-family:"Pixelify Sans",monospace; color:var(--gold); text-shadow:0 3px 0 rgba(0,0,0,.35); display:inline-block; }
+  .cbox .adj button, #pauseBtn, .row button, .seg button { border-radius:12px !important; border:2px solid var(--line) !important; background:#31265a !important; box-shadow:0 4px 0 #171030; transition:transform .1s, box-shadow .1s; }
+  .cbox .adj button:active, #pauseBtn:active, .row button:active { transform:translateY(4px); box-shadow:0 0 0 #171030; }
+  #saveBtn, #startBtn, .row button.go { background:linear-gradient(180deg,#8ff0b0,#5fcf86) !important; color:#123322 !important; border:2px solid #3ea866 !important; box-shadow:0 5px 0 #2f8a52, inset 0 3px 0 rgba(255,255,255,.5); border-radius:14px !important; font-weight:900; transition:transform .1s, box-shadow .1s; }
+  #saveBtn:active, #startBtn:active { transform:translateY(5px); box-shadow:0 0 0 #2f8a52; }
+  #startCover { background:radial-gradient(120% 70% at 50% 0%,#3d2c6e,#1d1633 70%) !important; }
+  #panel, #setPanel { display:flex !important; visibility:hidden; transform:translateY(104%); transition:transform .42s cubic-bezier(.2,.9,.25,1), visibility 0s linear .42s; }
+  #panel.open, #setPanel.open { visibility:visible; transform:none; transition:transform .42s cubic-bezier(.2,.9,.25,1), visibility 0s; }
+  #toast { border-radius:14px; border:2px solid var(--line); background:#2d2350; box-shadow:0 5px 0 #150e2b; font-weight:900; }
+  #fx { position:fixed; inset:0; pointer-events:none; z-index:60; overflow:hidden; }
+  .bit { position:absolute; width:7px; height:7px; border-radius:1px; }
+  .plus { position:absolute; font-family:"Pixelify Sans",monospace; font-size:26px; color:#fff; text-shadow:0 3px 0 rgba(0,0,0,.35); }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <h1>Camera Car Counter</h1>
+    <h1>Car Cam</h1>
     <a class="pill" href="index.html">Tap counter</a>
     <button class="pill" id="setBtn">⚙</button>
     <button class="pill" id="logBtn">Saved (0) ▸</button>
@@ -118,6 +141,7 @@
   </div>
 </div>
 <div id="toast"></div>
+<div id="fx"></div>
 
 <script>
 (function () {
@@ -203,8 +227,24 @@
     this.tracks = tracks.filter(function (t) { return now - t.last < 1200; });
   };
   var skipped = 0;
-  var carTracker = new Tracker(function () { state.cars++; save(); render(); vibrate(15); }, function () { return cfg.minH; });
-  var meterTracker = new Tracker(function () { state.meters++; save(); render(); vibrate([10, 30, 10]); }, function () { return 0.04; });
+  var carTracker = new Tracker(function () { state.cars++; save(); render(); vibrate(15); juice("carN", "#6fb7ff", 659.25); }, function () { return cfg.minH; });
+  var meterTracker = new Tracker(function () { state.meters++; save(); render(); vibrate([10, 30, 10]); juice("meterN", "#ffc24d", 880); }, function () { return 0.04; });
+  // ---- game feel ----
+  var reduceM = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches, actx = null;
+  function tone(f, t0, dur, vol) { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); var o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + (t0 || 0);
+    o.type = "triangle"; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.08, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.16));
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + (dur || 0.16) + 0.02); } catch (e) {} }
+  function juice(id, color, f) {
+    tone(f, 0, 0.14, 0.08); tone(f * 1.5, 0.06, 0.12, 0.04);
+    var el = $(id); if (!el || reduceM) return;
+    el.animate([{ transform: "scale(1)" }, { transform: "scale(1.35) rotate(-3deg)" }, { transform: "scale(.96)" }, { transform: "scale(1)" }], { duration: 380, easing: "cubic-bezier(.34,1.56,.64,1)" });
+    var r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, fx = $("fx");
+    for (var i = 0; i < 10; i++) { var b = document.createElement("i"); b.className = "bit"; b.style.left = x + "px"; b.style.top = y + "px"; b.style.background = i % 3 ? color : "#fff6e4"; fx.appendChild(b);
+      var a = Math.random() * 6.28, d = 40 + Math.random() * 40;
+      b.animate([{ transform: "translate(-50%,-50%)", opacity: 1 }, { transform: "translate(calc(-50% + " + Math.cos(a) * d + "px), calc(-50% + " + (Math.sin(a) * d - 20) + "px)) scale(.3)", opacity: 0 }], { duration: 600, easing: "cubic-bezier(.2,.8,.3,1)" }).onfinish = (function (n) { return function () { n.remove(); }; })(b); }
+    var p = document.createElement("div"); p.className = "plus"; p.textContent = "+1"; p.style.left = x + "px"; p.style.top = y + "px"; fx.appendChild(p);
+    p.animate([{ transform: "translate(-50%,-50%) scale(.6)", opacity: 0 }, { transform: "translate(-50%,-140%) scale(1.15)", opacity: 1, offset: .25 }, { transform: "translate(-50%,-280%)", opacity: 0 }], { duration: 700 }).onfinish = function () { p.remove(); };
+  }
 
   // ---------- Camera + model ----------
   var model = null, running = false, paused = false, frames = 0, fpsT = performance.now();
@@ -330,6 +370,7 @@
     });
     var msg = "Saved " + state.cars + " cars" + (gps.street ? " · " + gps.street : "");
     state.cars = 0; state.meters = 0; save(); render(); vibrate([15, 40, 15]); toast(msg);
+    [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) { tone(f, i * 0.07, 0.22, 0.08); });
   });
   function cell(v, sep) { v = v == null ? "" : String(v); if (sep === "\t") return v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
   function exportText(sep) {

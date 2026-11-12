@@ -3,7 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Parking Tap Counter</title>
+<title>Curb Count</title>
+<meta name="theme-color" content="#231a3d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
@@ -128,6 +133,121 @@
     max-width: 92vw; text-align: center;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ================= Cozy game theme ================= */
+  :root {
+    --bg: #1d1633; --panel: #261d42; --line: #3b2f62; --text: #fff6e4; --dim: #b8aed2;
+    --green: #2f6b52; --green-hi: #7fe0a0; --danger: #ff7b7b; --gold: #ffd35c;
+    --ease-out: cubic-bezier(.2,.9,.25,1); --ease-back: cubic-bezier(.34,1.56,.64,1);
+  }
+  html, body { font-family: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 700;
+    background: radial-gradient(120% 80% at 50% 0%, #3a2b63 0%, #241b40 45%, #170f2b 100%); }
+  .px { font-family: "Pixelify Sans", "Nunito", monospace; letter-spacing: .02em; }
+
+  /* sky header with day/night tint */
+  #app > header, #panel > header, #mapPanel > header {
+    position: relative; overflow: hidden; padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    background: var(--sky, linear-gradient(180deg, #4b3a86, #6b4f9e)); border-bottom: 2px solid rgba(0,0,0,.25);
+    box-shadow: 0 4px 0 rgba(0,0,0,.18);
+  }
+  body[data-tod="dawn"]  { --sky: linear-gradient(180deg, #ff9e7a 0%, #ffc58f 55%, #ffd9a0 100%); }
+  body[data-tod="day"]   { --sky: linear-gradient(180deg, #4aa3e8 0%, #7cc4f0 60%, #a7dcf5 100%); }
+  body[data-tod="dusk"]  { --sky: linear-gradient(180deg, #4a2f7a 0%, #b2557a 60%, #f19065 100%); }
+  body[data-tod="night"] { --sky: linear-gradient(180deg, #120c2a 0%, #251a4d 60%, #3a2a6b 100%); }
+  header h1 { position: relative; z-index: 2; text-shadow: 0 2px 0 rgba(0,0,0,.3); }
+  header .pill, header > div { position: relative; z-index: 2; }
+  .skyfx { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+  .cloud { position: absolute; width: 8px; height: 8px; background: rgba(255,255,255,.75);
+    box-shadow: 8px 0 #fff, 16px 0 #fff, 24px 0 rgba(255,255,255,.9), 8px -8px #fff, 16px -8px #fff, 32px 0 rgba(255,255,255,.7);
+    opacity: .55; animation: drift linear infinite; }
+  body[data-tod="night"] .cloud { opacity: .12; }
+  @keyframes drift { from { transform: translateX(-60px); } to { transform: translateX(110vw); } }
+  .star { position: absolute; width: 3px; height: 3px; background: #fff; opacity: 0; animation: twinkle 3s ease-in-out infinite; }
+  body[data-tod="night"] .star, body[data-tod="dusk"] .star { opacity: .8; }
+  @keyframes twinkle { 50% { transform: scale(.4); opacity: .2; } }
+
+  .pill { background: rgba(20,12,40,.32) !important; border: 2px solid rgba(255,255,255,.22) !important; border-radius: 12px !important;
+    font-family: "Nunito", sans-serif; font-weight: 900 !important; box-shadow: 0 3px 0 rgba(0,0,0,.25); transition: transform .12s var(--ease-out), box-shadow .12s; }
+  .pill:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,.25); }
+
+  /* HUD: level badge + xp bar */
+  .hud { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; position: relative; z-index: 2; }
+  .lv { flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px; background: var(--gold); color: #3a2400;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+    box-shadow: 0 3px 0 #b8861c, inset 0 2px 0 rgba(255,255,255,.6); }
+  .lv small { font-size: 9px; font-weight: 900; } .lv b { font-size: 17px; }
+  .hudText { min-width: 0; flex: 1; }
+  .hudTitle { font-size: 17px; line-height: 1.05; color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,.35); white-space: nowrap; }
+  .xp { height: 9px; margin-top: 4px; border-radius: 6px; background: rgba(0,0,0,.35); overflow: hidden; border: 2px solid rgba(0,0,0,.25); max-width: 150px; }
+  .xp i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #7fe0a0, #ffd35c); transition: width .6s var(--ease-back); }
+  .hudSub { font-size: 11px; color: rgba(255,255,255,.85); margin-top: 2px; white-space: nowrap; }
+
+  #gpsBar { background: rgba(14,9,30,.55); border-bottom: 1px solid var(--line); }
+  .idRow, #notesArea, footer { background: rgba(38,29,66,.92); }
+  .idRow input, #notesArea input { background: #1a1330; border: 2px solid var(--line); border-radius: 12px; font-family: "Nunito", sans-serif; font-weight: 800; }
+  .segBtn, #moreBtn, #undoBtn { border-radius: 12px; border: 2px solid var(--line); background: #31265a; color: var(--dim);
+    box-shadow: 0 4px 0 #171030; transition: transform .1s var(--ease-out), box-shadow .1s, background .2s, color .2s; font-family: "Nunito", sans-serif; font-weight: 900; }
+  .segBtn.on { background: #fff6e4; color: #2a1e4a; border-color: #fff6e4; box-shadow: 0 4px 0 #b8ab92; }
+  .segBtn:active, #moreBtn:active, #undoBtn:active { transform: translateY(4px); box-shadow: 0 0 0 #171030; }
+
+  /* tiles = chunky game buttons */
+  #grid { gap: 10px; padding: 10px 12px 12px; }
+  .tile { border-radius: 18px; border: 2px solid rgba(0,0,0,.18); color: #241a3f;
+    box-shadow: 0 6px 0 var(--shade, rgba(0,0,0,.3)), inset 0 3px 0 rgba(255,255,255,.45), inset 0 -10px 18px rgba(0,0,0,.08);
+    transition: transform .09s var(--ease-out), box-shadow .09s var(--ease-out), filter .2s; position: relative; overflow: visible; }
+  .tile:active { transform: translateY(6px) !important; filter: brightness(.96) !important; box-shadow: 0 0 0 var(--shade), inset 0 3px 0 rgba(255,255,255,.35); }
+  .tile.bump { transform: none; }
+  .tile .lab { font-size: 15px; font-weight: 900; letter-spacing: .01em; }
+  .tile .num { font-family: "Pixelify Sans", monospace; font-weight: 700; text-shadow: 0 3px 0 rgba(255,255,255,.35); will-change: transform; }
+  .tile.zero .num { opacity: .3; }
+
+  footer { gap: 10px; border-top: 2px solid var(--line); }
+  #total { font-family: "Nunito", sans-serif; color: var(--dim); }
+  #total b { font-family: "Pixelify Sans", monospace; font-size: 26px; color: var(--gold); text-shadow: 0 2px 0 rgba(0,0,0,.35); display: inline-block; }
+  #saveBtn, .sumBtns button.go, .mapBtns button.go, .exportRow button.primary {
+    background: linear-gradient(180deg, #8ff0b0, #5fcf86) !important; color: #123322 !important; border: 2px solid #3ea866 !important;
+    box-shadow: 0 5px 0 #2f8a52, inset 0 3px 0 rgba(255,255,255,.5); border-radius: 14px; font-weight: 900; font-family: "Nunito", sans-serif;
+    transition: transform .1s var(--ease-out), box-shadow .1s; }
+  #saveBtn:active, .sumBtns button.go:active, .mapBtns button.go:active { transform: translateY(5px); box-shadow: 0 0 0 #2f8a52; }
+  .sumBtns button, .mapBtns button, .exportRow button, .recTop button { border-radius: 12px !important; border: 2px solid var(--line) !important;
+    background: #31265a !important; box-shadow: 0 4px 0 #171030; font-family: "Nunito", sans-serif; font-weight: 900 !important; }
+
+  /* sheets slide up instead of popping */
+  #panel, #mapPanel, #sumPanel { display: flex !important; visibility: hidden; transform: translateY(104%);
+    transition: transform .42s var(--ease-out), visibility 0s linear .42s; background: var(--bg); }
+  #panel.open, #mapPanel.open, #sumPanel.open { visibility: visible; transform: none; transition: transform .42s var(--ease-out), visibility 0s; }
+  .rec { border-radius: 16px; border: 2px solid var(--line); background: var(--panel); box-shadow: 0 4px 0 #150e2b; }
+
+  /* finish screen */
+  #sumPanel { background: radial-gradient(120% 70% at 50% 0%, #3d2c6e, #1d1633 70%); }
+  #sumPanel .sh { font-family: "Pixelify Sans", monospace; font-size: 15px; color: var(--gold); letter-spacing: .06em; }
+  #sumTitle { font-family: "Nunito", sans-serif; font-weight: 900; }
+  #sumPanel { padding-top: calc(18px + env(safe-area-inset-top, 0px)) !important; }
+  .srow { border-radius: 16px; box-shadow: 0 5px 0 rgba(0,0,0,.3), inset 0 3px 0 rgba(255,255,255,.4); opacity: 0; transform: translateY(18px) scale(.96); }
+  #sumPanel.open .srow { animation: rowIn .45s var(--ease-back) forwards; }
+  @keyframes rowIn { to { opacity: 1; transform: none; } }
+  .srow .v { font-family: "Pixelify Sans", monospace; }
+  .reward { display: flex; gap: 8px; margin: 2px 0 12px; opacity: 0; transform: scale(.9); }
+  #sumPanel.open .reward { animation: rowIn .5s var(--ease-back) .15s forwards; }
+  .chipR { padding: 6px 10px; border-radius: 10px; background: rgba(255,211,92,.16); border: 2px solid rgba(255,211,92,.45); color: var(--gold); font-weight: 900; font-size: 13px; }
+
+  /* juice */
+  #fx { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
+  .bit { position: absolute; width: 7px; height: 7px; border-radius: 1px; will-change: transform, opacity; }
+  .plus { position: absolute; font-family: "Pixelify Sans", monospace; font-weight: 700; font-size: 26px; color: #fff;
+    text-shadow: 0 3px 0 rgba(0,0,0,.35), 0 0 12px rgba(255,255,255,.35); will-change: transform, opacity; }
+  #toast { font-family: "Nunito", sans-serif; font-weight: 900; border-radius: 14px; border: 2px solid var(--line); background: #2d2350; box-shadow: 0 5px 0 #150e2b; }
+  #levelUp { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 70; }
+  #levelUp div { font-family: "Pixelify Sans", monospace; font-size: 40px; color: var(--gold); text-align: center; line-height: 1.1;
+    text-shadow: 0 4px 0 #8a5a00, 0 0 30px rgba(255,211,92,.6); opacity: 0; }
+  #levelUp small { display: block; font-size: 18px; color: #fff; text-shadow: 0 3px 0 rgba(0,0,0,.4); }
+  .soundRow { display: flex; align-items: center; gap: 10px; font-weight: 900; margin: 6px 2px 0; }
+  .soundRow input { width: 22px; height: 22px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cloud, .star { animation: none; } .srow, .reward { opacity: 1; transform: none; animation: none !important; }
+    #panel, #mapPanel, #sumPanel { transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -219,13 +339,13 @@
   "use strict";
   // Order and labels match the Field Maps form.
   var CATS = [
-    { key: "meter",      label: "Meter",          field: "Spaces Meter",                     color: "#4fa3ff" },
-    { key: "loading",    label: "Loading",        field: "Spaces Loading (paid and unpaid)", color: "#ffb020" },
-    { key: "ada",        label: "ADA",            field: "Spaces ADA (paid and unpaid)",     color: "#2dd4bf" },
-    { key: "time",       label: "Time Limited",   field: "Spaces Time Limited (unpaid)",     color: "#5fbf72" },
-    { key: "unres",      label: "Unrestricted",   field: "Spaces Unrestricted",              color: "#b48cff" },
-    { key: "restricted", label: "Restricted Use", field: "Spaces Restricted Use (unpaid)",   color: "#f58a8a" },
-    { key: "other",      label: "Other",          field: "Spaces Other",                     color: "#a3acb6" }
+    { key: "meter",      label: "Meter",          field: "Spaces Meter",                     color: "#6fb7ff" },
+    { key: "loading",    label: "Loading",        field: "Spaces Loading (paid and unpaid)", color: "#ffc24d" },
+    { key: "ada",        label: "ADA",            field: "Spaces ADA (paid and unpaid)",     color: "#4fd8c5" },
+    { key: "time",       label: "Time Limited",   field: "Spaces Time Limited (unpaid)",     color: "#8ad66f" },
+    { key: "unres",      label: "Unrestricted",   field: "Spaces Unrestricted",              color: "#c7a2ff" },
+    { key: "restricted", label: "Restricted Use", field: "Spaces Restricted Use (unpaid)",   color: "#ff9a8a" },
+    { key: "other",      label: "Other",          field: "Spaces Other",                     color: "#c9c0d8" }
   ];
   var KEY = "blockfaceCount_v3";
 
@@ -726,7 +846,156 @@
     toast((rec ? "Recounting " : "Counting ") + roads.curbs[selected].street + " · " + roads.curbs[selected].side);
   });
 
+  window.__app = { state: state, CATS: CATS, total: total, records: function () { return state.records; } };
   load(); loadSavedRoads(); render(); startGps();
+})();
+</script>
+
+<div id="fx"></div>
+<div id="levelUp"><div></div></div>
+<script>
+/* ===== Game feel: sky, sound, particles, XP ===== */
+(function () {
+  "use strict";
+  var app = window.__app; if (!app) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var fx = $("fx");
+
+  // ---- time-of-day sky ----
+  function tod() { var hr = new Date().getHours(); return hr >= 5 && hr < 8 ? "dawn" : hr >= 8 && hr < 17 ? "day" : hr >= 17 && hr < 20 ? "dusk" : "night"; }
+  document.body.setAttribute("data-tod", tod());
+  setInterval(function () { document.body.setAttribute("data-tod", tod()); }, 60000);
+  Array.prototype.forEach.call(document.querySelectorAll("#app > header, #panel > header, #mapPanel > header"), function (hd, hi) {
+    var sky = document.createElement("div"); sky.className = "skyfx";
+    for (var i = 0; i < 14; i++) { var s = document.createElement("i"); s.className = "star"; s.style.left = (Math.random() * 100) + "%"; s.style.top = (Math.random() * 80) + "%"; s.style.animationDelay = (Math.random() * 3) + "s"; sky.appendChild(s); }
+    for (var c = 0; c < 2; c++) { var cl = document.createElement("i"); cl.className = "cloud"; cl.style.top = (12 + c * 22 + hi * 3) + "px"; cl.style.animationDuration = (38 + c * 17) + "s"; cl.style.animationDelay = (-Math.random() * 40) + "s"; sky.appendChild(cl); }
+    hd.insertBefore(sky, hd.firstChild);
+  });
+
+  // ---- HUD (level + xp) replaces the plain title ----
+  var GKEY = "curbGame_v1";
+  var g = { total: 0, day: "", today: 0, streak: 0, lastDay: "", sound: true, goal: 40 };
+  try { var s0 = JSON.parse(localStorage.getItem(GKEY) || "null"); if (s0) for (var k in g) if (s0.hasOwnProperty(k)) g[k] = s0[k]; } catch (e) {}
+  if (!g.total) g.total = app.records().length;
+  function saveG() { try { localStorage.setItem(GKEY, JSON.stringify(g)); } catch (e) {} }
+  function dayKey(d) { d = d || new Date(); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
+  if (g.day !== dayKey()) { g.day = dayKey(); g.today = 0; saveG(); }
+  var PER = 10;
+  function level() { return Math.floor(g.total / PER) + 1; }
+  var h1 = document.querySelector("#app > header h1");
+  var hud = document.createElement("div"); hud.className = "hud";
+  hud.innerHTML = '<div class="lv px"><small>LV</small><b id="lvN">1</b></div><div class="hudText"><div class="hudTitle px">Curb Count</div><div class="xp"><i id="xpBar"></i></div><div class="hudSub" id="hudSub"></div></div>';
+  h1.parentNode.replaceChild(hud, h1);
+  function renderHud() {
+    $("lvN").textContent = level();
+    $("xpBar").style.width = ((g.total % PER) / PER * 100) + "%";
+    $("hudSub").textContent = "Today " + g.today + "/" + g.goal + (g.streak > 1 ? " · 🔥 " + g.streak + " days" : "");
+  }
+  renderHud();
+
+  // ---- sound (tiny synth, no files) ----
+  var ac = null;
+  function ctx() { if (!g.sound) return null; try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === "suspended") ac.resume(); } catch (e) { ac = null; } return ac; }
+  function tone(freq, t0, dur, vol, type) {
+    var a = ctx(); if (!a) return;
+    var o = a.createOscillator(), gn = a.createGain(), t = a.currentTime + (t0 || 0);
+    o.type = type || "triangle"; o.frequency.setValueAtTime(freq, t);
+    gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(vol || 0.09, t + 0.012); gn.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.16));
+    o.connect(gn); gn.connect(a.destination); o.start(t); o.stop(t + (dur || 0.16) + 0.02);
+  }
+  var SCALE = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66];   // C major pentatonic-ish, one per tile
+  function sndTap(i) { tone(SCALE[i % SCALE.length], 0, 0.14, 0.08); tone(SCALE[i % SCALE.length] * 2, 0.01, 0.06, 0.025, "sine"); }
+  function sndUndo() { tone(330, 0, 0.12, 0.06, "square"); tone(262, 0.06, 0.14, 0.05, "square"); }
+  function sndDone() { [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) { tone(f, i * 0.07, 0.22, 0.08); }); }
+  function sndLevel() { [523.25, 659.25, 783.99, 1046.5, 1318.5, 1568].forEach(function (f, i) { tone(f, i * 0.08, 0.3, 0.085); }); }
+
+  // ---- particles ----
+  function burst(x, y, color, n, spread) {
+    if (reduce) return;
+    for (var i = 0; i < n; i++) {
+      var b = document.createElement("i"); b.className = "bit";
+      b.style.left = x + "px"; b.style.top = y + "px"; b.style.background = i % 3 === 0 ? "#fff6e4" : color;
+      fx.appendChild(b);
+      var ang = Math.random() * Math.PI * 2, dist = (spread || 60) * (0.5 + Math.random()), dx = Math.cos(ang) * dist, dy = Math.sin(ang) * dist - 30;
+      var anim = b.animate([
+        { transform: "translate(-50%,-50%) scale(1) rotate(0deg)", opacity: 1 },
+        { transform: "translate(calc(-50% + " + dx + "px), calc(-50% + " + dy + "px)) scale(.6) rotate(" + (Math.random() * 360) + "deg)", opacity: 1, offset: .6 },
+        { transform: "translate(calc(-50% + " + dx * 1.1 + "px), calc(-50% + " + (dy + 40) + "px)) scale(.2)", opacity: 0 }
+      ], { duration: 520 + Math.random() * 260, easing: "cubic-bezier(.2,.8,.3,1)" });
+      anim.onfinish = (function (el) { return function () { el.remove(); }; })(b);
+    }
+  }
+  function floatText(x, y, text, color) {
+    if (reduce) return;
+    var t = document.createElement("div"); t.className = "plus"; t.textContent = text; t.style.left = x + "px"; t.style.top = y + "px"; if (color) t.style.color = color;
+    fx.appendChild(t);
+    t.animate([
+      { transform: "translate(-50%,-50%) scale(.6)", opacity: 0 },
+      { transform: "translate(-50%,-120%) scale(1.15)", opacity: 1, offset: .25 },
+      { transform: "translate(-50%,-260%) scale(1)", opacity: 0 }
+    ], { duration: 700, easing: "cubic-bezier(.2,.8,.3,1)" }).onfinish = function () { t.remove(); };
+  }
+  function pop(el, big) {
+    if (!el || reduce) return;
+    el.animate([{ transform: "scale(1)" }, { transform: "scale(" + (big ? 1.35 : 1.22) + ") rotate(-3deg)" }, { transform: "scale(.96)" }, { transform: "scale(1)" }],
+      { duration: 360, easing: "cubic-bezier(.34,1.56,.64,1)" });
+  }
+  function shadeOf(hex) { var n = parseInt(hex.slice(1), 16), r = (n >> 16) * .62, gg = (n >> 8 & 255) * .62, b = (n & 255) * .62; return "rgb(" + (r | 0) + "," + (gg | 0) + "," + (b | 0) + ")"; }
+
+  // tile shading + tap juice
+  var tiles = document.querySelectorAll("#grid .tile");
+  Array.prototype.forEach.call(tiles, function (t, i) {
+    var col = app.CATS[i].color; t.style.setProperty("--shade", shadeOf(col));
+    t.addEventListener("click", function (e) {
+      var r = t.getBoundingClientRect(), x = e.clientX || r.left + r.width / 2, y = e.clientY || r.top + r.height / 2;
+      sndTap(i); burst(x, y, col, 9, 48); floatText(x, y - 10, "+1"); pop(t.querySelector(".num"));
+      pop($("total").querySelector("b"));
+    });
+  });
+  $("undoBtn").addEventListener("click", function () { sndUndo(); var b = $("total").querySelector("b"); if (b && !reduce) b.animate([{ transform: "translateX(0)" }, { transform: "translateX(-5px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }], { duration: 260 }); });
+
+  // finish screen: reward chips + confetti
+  var sum = $("sumPanel"), reward = document.createElement("div"); reward.className = "reward";
+  $("sumTitle").insertAdjacentElement("afterend", reward);
+  $("saveBtn").addEventListener("click", function () {
+    var tot = app.total(app.state.counts);
+    reward.innerHTML = '<span class="chipR">+1 curb</span><span class="chipR">⭐ ' + tot + ' spaces</span><span class="chipR">LV ' + level() + " · " + (PER - g.total % PER) + " to next</span>";
+    Array.prototype.forEach.call(sum.querySelectorAll(".srow"), function (r, i) { r.style.animationDelay = (0.08 + i * 0.07) + "s"; });
+    sndDone();
+    setTimeout(function () {
+      var w = window.innerWidth;
+      for (var k = 0; k < 4; k++) burst(w * (0.2 + k * 0.2), 90, ["#ffd35c", "#7fe0a0", "#6fb7ff", "#ff9a8a"][k], 14, 90);
+    }, 180);
+  });
+  $("sumNext").addEventListener("click", function () {
+    var before = level();
+    g.total++; if (g.day !== dayKey()) { g.day = dayKey(); g.today = 0; }
+    g.today++;
+    var y = new Date(); y.setDate(y.getDate() - 1);
+    if (g.lastDay !== dayKey()) { g.streak = g.lastDay === dayKey(y) ? g.streak + 1 : 1; g.lastDay = dayKey(); }
+    saveG(); renderHud(); pop(document.querySelector(".lv"), true);
+    if (level() > before) levelUp(level());
+    else if (g.today === g.goal) levelUp(null, "Daily goal hit!");
+  });
+  function levelUp(lv, msg) {
+    sndLevel();
+    var box = $("levelUp").firstElementChild;
+    box.innerHTML = lv ? "LEVEL UP!<small>Level " + lv + "</small>" : msg + "<small>" + g.today + " curbs today</small>";
+    if (reduce) return;
+    box.animate([{ opacity: 0, transform: "scale(.4) translateY(30px)" }, { opacity: 1, transform: "scale(1.12)", offset: .25 }, { opacity: 1, transform: "scale(1)", offset: .8 }, { opacity: 0, transform: "scale(1.05) translateY(-20px)" }],
+      { duration: 1800, easing: "cubic-bezier(.34,1.56,.64,1)" });
+    var w = window.innerWidth, hh = window.innerHeight;
+    for (var k = 0; k < 6; k++) burst(w * (0.1 + k * 0.16), hh * 0.45, ["#ffd35c", "#7fe0a0", "#6fb7ff", "#ff9a8a", "#c7a2ff", "#fff6e4"][k], 16, 120);
+  }
+
+  // sound toggle lives in the Saved sheet
+  var row = document.createElement("label"); row.className = "soundRow";
+  row.innerHTML = '<input type="checkbox" id="sndToggle"> Sounds &amp; tap tones';
+  var clearH = Array.prototype.filter.call(document.querySelectorAll("#panel h2"), function (x) { return /reset/i.test(x.textContent); })[0];
+  if (clearH) clearH.parentNode.insertBefore(row, clearH); else document.querySelector("#panel .pbody").appendChild(row);
+  $("sndToggle").checked = !!g.sound;
+  $("sndToggle").addEventListener("change", function () { g.sound = this.checked; saveG(); if (g.sound) tone(784, 0, .12, .08); });
 })();
 </script>
 </body>
