@@ -291,50 +291,90 @@
     if (out.length >= 2) { out[0] = trim(out[0], out[1]); out[out.length - 1] = trim(out[out.length - 1], out[out.length - 2]); }
     return out.map(P.inv);
   }
-  function buildRoads(data, center) {
-    var nodes = {}, uses = {}, ways = [];
-    data.elements.forEach(function (e) {
-      if (e.type === "node") nodes[e.id] = [e.lat, e.lon];
-      else if (e.type === "way") ways.push(e);
-    });
-    ways.forEach(function (w) { w.nodes.forEach(function (n, i) { uses[n] = (uses[n] || 0) + (i === 0 || i === w.nodes.length - 1 ? 2 : 1); }); });
+  // Turn road segments [{id, name, coords:[[lat,lon],...]}] into curb lines on both sides.
+  function makeCurbs(segs, center) {
     var P = proj(center.lat, center.lon), blocks = [], curbs = {};
-    ways.forEach(function (w) {
-      var t = w.tags || {}, name = t.name || t.ref || "Unnamed road";
-      var seg = [], k = 0;
-      w.nodes.forEach(function (n, i) {
-        if (!nodes[n]) return;
-        seg.push(nodes[n]);
-        var cut = i > 0 && (uses[n] > 1 || i === w.nodes.length - 1);
-        if (cut && seg.length >= 2) {
-          var id = w.id + "-" + (k++), c = seg.slice();
-          var a = P.fwd(c[0]), b = P.fwd(c[c.length - 1]);
-          var len = 0; for (var j = 1; j < c.length; j++) { var p1 = P.fwd(c[j - 1]), p2 = P.fwd(c[j]); len += Math.hypot(p2[0] - p1[0], p2[1] - p1[1]); }
-          if (len >= 15) {
-            var brg = (Math.atan2(b[0] - a[0], b[1] - a[1]) * 180 / Math.PI + 360) % 360;
-            var L = { id: id + "L", block: id, street: name, side: card4(brg - 90) + " side", coords: offsetLine(c, 7, P) };
-            var R = { id: id + "R", block: id, street: name, side: card4(brg + 90) + " side", coords: offsetLine(c, -7, P) };
-            curbs[L.id] = L; curbs[R.id] = R;
-            blocks.push({ id: id, street: name, coords: c, curbs: [L.id, R.id] });
-          }
-          seg = [nodes[n]];
-        }
-      });
+    segs.forEach(function (s) {
+      var c = s.coords; if (!c || c.length < 2) return;
+      var len = 0; for (var j = 1; j < c.length; j++) { var p1 = P.fwd(c[j - 1]), p2 = P.fwd(c[j]); len += Math.hypot(p2[0] - p1[0], p2[1] - p1[1]); }
+      if (len < 15) return;
+      var a = P.fwd(c[0]), b = P.fwd(c[c.length - 1]);
+      var brg = (Math.atan2(b[0] - a[0], b[1] - a[1]) * 180 / Math.PI + 360) % 360;
+      var L = { id: s.id + "L", block: s.id, street: s.name, side: card4(brg - 90) + " side", coords: offsetLine(c, 7, P) };
+      var R = { id: s.id + "R", block: s.id, street: s.name, side: card4(brg + 90) + " side", coords: offsetLine(c, -7, P) };
+      curbs[L.id] = L; curbs[R.id] = R;
+      blocks.push({ id: s.id, street: s.name, coords: c, curbs: [L.id, R.id] });
     });
     roads = { blocks: blocks, curbs: curbs, center: center };
     try { localStorage.setItem(ROADS_KEY, JSON.stringify(roads)); } catch (e) {}
   }
+  // OpenStreetMap (Overpass) ways → segments split at intersections
+  function osmToSegs(data) {
+    var nodes = {}, uses = {}, ways = [], segs = [];
+    data.elements.forEach(function (e) { if (e.type === "node") nodes[e.id] = [e.lat, e.lon]; else if (e.type === "way") ways.push(e); });
+    ways.forEach(function (w) { w.nodes.forEach(function (n, i) { uses[n] = (uses[n] || 0) + (i === 0 || i === w.nodes.length - 1 ? 2 : 1); }); });
+    ways.forEach(function (w) {
+      var t = w.tags || {}, name = t.name || t.ref || "Unnamed road", seg = [], k = 0;
+      w.nodes.forEach(function (n, i) {
+        if (!nodes[n]) return;
+        seg.push(nodes[n]);
+        if (i > 0 && (uses[n] > 1 || i === w.nodes.length - 1) && seg.length >= 2) {
+          segs.push({ id: "o" + w.id + "-" + (k++), name: name, coords: seg.slice() }); seg = [nodes[n]];
+        }
+      });
+    });
+    return segs;
+  }
+  // Indiana county centerlines (IGIO) GeoJSON → segments (already split at intersections)
+  function igioToSegs(gj) {
+    var segs = [];
+    (gj.features || []).forEach(function (f, i) {
+      var pr = f.properties || {}, g = f.geometry; if (!g) return;
+      var cls = String(pr.roadclass || "").toLowerCase();
+      if (/interstate|ramp|limited/.test(cls)) return;
+      var name = [pr.st_predir, pr.st_pretyp, pr.st_name, pr.st_postyp, pr.st_posdir].filter(function (x) { return x && String(x).trim(); }).join(" ") || "Unnamed road";
+      var parts = g.type === "LineString" ? [g.coordinates] : g.type === "MultiLineString" ? g.coordinates : [];
+      parts.forEach(function (line, k) {
+        segs.push({ id: "g" + (f.id != null ? f.id : i) + "-" + k, name: name, coords: line.map(function (xy) { return [xy[1], xy[0]]; }) });
+      });
+    });
+    return segs;
+  }
   function loadSavedRoads() {
     try { var r = JSON.parse(localStorage.getItem(ROADS_KEY) || "null"); if (r && r.curbs) roads = r; } catch (e) {}
   }
+  function fetchWithTimeout(url, opts, ms) {
+    var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    if (ctl) { opts = opts || {}; opts.signal = ctl.signal; }
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, ms);
+    return fetch(url, opts).then(function (r) { clearTimeout(t); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); },
+      function (e) { clearTimeout(t); throw e; });
+  }
   function fetchRoads(lat, lon, done) {
-    var q = '[out:json][timeout:30];way["highway"~"^(primary|secondary|tertiary|residential|unclassified|living_street|primary_link|secondary_link|tertiary_link)$"](around:1500,' +
-      lat.toFixed(5) + ',' + lon.toFixed(5) + ');(._;>;);out body;';
-    fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" } })
-      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then(function (j) { buildRoads(j, { lat: lat, lon: lon }); done(null); })
-      .catch(function (e) { done(e || new Error("failed")); });
+    var dLat = 0.0085, dLon = 0.011; // ~0.6 mile each way
+    var env = [lon - dLon, lat - dLat, lon + dLon, lat + dLat].map(function (v) { return v.toFixed(5); }).join(",");
+    var igio = "https://gisdata.in.gov/server/rest/services/Hosted/Road_Centerlines_of_Indiana_2025/FeatureServer/0/query" +
+      "?where=1%3D1&geometry=" + encodeURIComponent(env) + "&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects" +
+      "&outFields=st_predir,st_pretyp,st_name,st_postyp,st_posdir,roadclass&outSR=4326&geometryPrecision=6&resultRecordCount=2000&f=geojson";
+    var q = '[out:json][timeout:25];way["highway"~"^(primary|secondary|tertiary|residential|unclassified|living_street|primary_link|secondary_link|tertiary_link)$"](' +
+      (lat - dLat).toFixed(5) + ',' + (lon - dLon).toFixed(5) + ',' + (lat + dLat).toFixed(5) + ',' + (lon + dLon).toFixed(5) + ');(._;>;);out body;';
+    var overpass = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
+    var center = { lat: lat, lon: lon };
+    mapMsg.textContent = "Loading roads (Indiana county map)…";
+    fetchWithTimeout(igio, {}, 20000).then(function (gj) {
+      var segs = igioToSegs(gj); if (segs.length < 5) throw new Error("few");
+      makeCurbs(segs, center); done(null, "Indiana county road map");
+    }).catch(function () {
+      var i = 0;
+      (function tryNext() {
+        if (i >= overpass.length) { done(new Error("all failed")); return; }
+        var url = overpass[i++];
+        mapMsg.textContent = "Loading roads (OpenStreetMap " + i + "/" + overpass.length + ")…";
+        fetchWithTimeout(url, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 25000)
+          .then(function (j) { var segs = osmToSegs(j); if (!segs.length) throw new Error("empty"); makeCurbs(segs, center); done(null, "OpenStreetMap"); })
+          .catch(tryNext);
+      })();
+    });
   }
   function distToLine(pt, coords, P) {
     var p = P.fwd(pt), best = Infinity;
@@ -648,19 +688,19 @@
     if (typeof L === "undefined") { mapMsg.textContent = "Map library didn't load — check your connection."; return false; }
     var start = gps.lat != null ? [gps.lat, gps.lon] : roads.center ? [roads.center.lat, roads.center.lon] : [39.7684, -86.1581];
     map = L.map("map", { zoomControl: false, attributionControl: true }).setView(start, 17);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      maxZoom: 20, subdomains: "abcd", attribution: "© OpenStreetMap contributors © CARTO"
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: "© OpenStreetMap contributors"
     }).addTo(map);
     drawCurbs(); updateMeOnMap();
     return true;
   }
   function loadHere(lat, lon) {
     mapMsg.textContent = "Loading roads…"; $("loadRoads").disabled = true;
-    fetchRoads(lat, lon, function (err) {
+    fetchRoads(lat, lon, function (err, src) {
       $("loadRoads").disabled = false;
-      if (err) { mapMsg.textContent = "Couldn't load roads here (needs the hosted link + signal). Try again in a bit."; return; }
+      if (err) { mapMsg.textContent = "Couldn't load roads — check signal and tap “Load roads here” again."; return; }
       autoPick(); drawCurbs(); render();
-      mapMsg.textContent = Object.keys(roads.curbs).length + " curbs loaded. Tap one to count it. Green = counted.";
+      mapMsg.textContent = Object.keys(roads.curbs).length + " curbs loaded (" + src + "). Blue = your curb, green = counted.";
     });
   }
   $("mapBtn").addEventListener("click", function () {
