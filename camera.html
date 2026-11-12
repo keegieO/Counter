@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Camera Car Counter</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<style>
+  :root { --bg:#0e1110; --panel:#161a18; --line:#2a302d; --text:#f3f5f4; --dim:#8e9792; --green:#3f7d4a; --hi:#5fbf72; --amber:#ffb020; --red:#f06a6a; --blue:#4fa3ff; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; height:100%; background:#000; color:var(--text); overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; touch-action:manipulation; }
+  #app { position:fixed; inset:0; display:flex; flex-direction:column; }
+  header { background:var(--green); padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  header h1 { margin:0; font-size:16px; font-weight:800; flex:1; }
+  .pill { background:rgba(255,255,255,.16); color:#fff; border:0; border-radius:999px; padding:8px 12px; font-size:13px; font-weight:800; text-decoration:none; white-space:nowrap; }
+  #gpsBar { display:flex; gap:8px; align-items:center; padding:6px 12px; background:#101412; font-size:13px; font-weight:700; flex-shrink:0; }
+  #gpsDot { width:9px; height:9px; border-radius:50%; background:var(--dim); flex-shrink:0; }
+  #gpsDot.ok { background:var(--hi); } #gpsDot.bad { background:var(--red); }
+  #gpsText { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #stage { position:relative; flex:1; min-height:0; background:#000; overflow:hidden; }
+  video, #overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  #centerLine { position:absolute; top:0; bottom:0; left:50%; width:0; border-left:3px dashed rgba(255,216,77,.85); pointer-events:none; }
+  #status { position:absolute; left:10px; right:10px; top:10px; background:rgba(0,0,0,.6); padding:8px 10px; border-radius:10px; font-size:13px; font-weight:700; text-align:center; }
+  #fps { position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:8px; font-size:12px; color:var(--dim); }
+  #startCover { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center; background:var(--bg); }
+  #startCover p { margin:0; color:var(--dim); font-size:14px; line-height:1.45; max-width:360px; }
+  #startBtn { padding:18px 28px; border-radius:14px; border:0; background:var(--hi); color:#08130b; font-size:18px; font-weight:800; }
+  .counts { display:flex; gap:8px; padding:10px 12px 6px; background:var(--panel); flex-shrink:0; }
+  .cbox { flex:1; border-radius:12px; padding:8px 10px; background:#1d2220; border:1px solid var(--line); }
+  .cbox .l { font-size:12px; font-weight:800; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; }
+  .cbox .n { font-size:44px; font-weight:800; line-height:1.05; font-variant-numeric:tabular-nums; }
+  .cbox .adj { display:flex; gap:6px; margin-top:4px; }
+  .cbox .adj button { flex:1; padding:8px 0; border-radius:8px; border:1px solid var(--line); background:#262c29; color:var(--text); font-size:16px; font-weight:800; }
+  footer { display:flex; gap:8px; padding:6px 12px calc(10px + env(safe-area-inset-bottom,0px)); background:var(--panel); flex-shrink:0; }
+  footer button { padding:15px 10px; border-radius:12px; border:1px solid var(--line); background:#1d2220; color:var(--text); font-size:15px; font-weight:800; }
+  #pauseBtn { flex:0 0 96px; }
+  #saveBtn { flex:1; background:var(--hi); border-color:var(--hi); color:#08130b; }
+  #panel { position:fixed; inset:0; background:var(--bg); display:none; flex-direction:column; z-index:20; }
+  #panel.open { display:flex; }
+  .pbody { flex:1; overflow-y:auto; padding:12px; }
+  .row { display:flex; gap:8px; margin-bottom:10px; }
+  .row button { flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:#1d2220; color:var(--text); font-size:14px; font-weight:800; }
+  .row button.go { background:var(--hi); color:#08130b; border-color:var(--hi); }
+  .rec { border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:10px 12px; margin-bottom:8px; display:flex; gap:10px; align-items:center; }
+  .rec .t { flex:1; min-width:0; } .rec .a { font-weight:800; } .rec .b { color:var(--dim); font-size:13px; }
+  .rec .n { font-size:22px; font-weight:800; text-align:right; }
+  #exportBox { width:100%; height:90px; display:none; background:#0f1312; color:var(--dim); border:1px solid var(--line); border-radius:8px; font-family:ui-monospace,Menlo,monospace; font-size:11px; margin-bottom:10px; }
+  #clearAll.armed { background:var(--red); color:#fff; }
+  #toast { position:fixed; left:50%; bottom:110px; transform:translateX(-50%); background:#222826; border:1px solid var(--line); padding:10px 16px; border-radius:999px; font-size:14px; font-weight:800; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; max-width:92vw; text-align:center; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Camera Car Counter</h1>
+    <a class="pill" href="index.html">Tap counter</a>
+    <button class="pill" id="logBtn">Saved (0) ▸</button>
+  </header>
+  <div id="gpsBar"><span id="gpsDot"></span><span id="gpsText">GPS starts with the camera</span></div>
+  <div id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+    <div id="centerLine"></div>
+    <div id="status">Loading…</div>
+    <div id="fps"></div>
+    <div id="startCover">
+      <div style="font-size:20px;font-weight:800">Point the phone out the side window</div>
+      <p>Mount it sideways (landscape works best) facing the curb you're counting. Each car is counted once when it passes the yellow line. Use + / − to fix misses.</p>
+      <button id="startBtn">Start camera</button>
+      <p id="startErr" style="color:var(--red)"></p>
+    </div>
+  </div>
+  <div class="counts">
+    <div class="cbox"><div class="l">Parked cars</div><div class="n" id="carN">0</div>
+      <div class="adj"><button data-k="cars" data-d="-1">−</button><button data-k="cars" data-d="1">+</button></div></div>
+    <div class="cbox"><div class="l">Meters (beta)</div><div class="n" id="meterN">0</div>
+      <div class="adj"><button data-k="meters" data-d="-1">−</button><button data-k="meters" data-d="1">+</button></div></div>
+  </div>
+  <footer>
+    <button id="pauseBtn">Pause</button>
+    <button id="saveBtn">Save curb &amp; reset ✓</button>
+  </footer>
+</div>
+
+<div id="panel">
+  <header><h1>Saved curbs</h1><button class="pill" id="closePanel">◂ Back</button></header>
+  <div class="pbody">
+    <div class="row"><button class="go" id="copyCsv">Copy CSV</button><button id="copyTable">Copy for Excel</button></div>
+    <textarea id="exportBox" readonly></textarea>
+    <div id="recList"></div>
+    <div class="row" style="margin-top:16px"><button id="clearAll">Clear all</button></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var video = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
+  var statusEl = $("status"), fpsEl = $("fps");
+  var KEY = "cameraCounter_v1";
+  var state = { cars: 0, meters: 0, records: [] };
+  try { var s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s && Array.isArray(s.records)) state = s; } catch (e) {}
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+  function toast(m) { var t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function () { t.classList.remove("show"); }, 1600); }
+  function vibrate(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+  function render() { $("carN").textContent = state.cars; $("meterN").textContent = state.meters; $("logBtn").textContent = "Saved (" + state.records.length + ") ▸"; }
+
+  // ---------- Tracker: each object counted once when it crosses the center line ----------
+  var VEHICLES = { car: 1, truck: 1, bus: 1, motorcycle: 1 };
+  function Tracker(onCount) { this.tracks = []; this.nextId = 1; this.onCount = onCount; }
+  Tracker.prototype.update = function (dets, now) {
+    var tracks = this.tracks, used = {};
+    var pairs = [];
+    dets.forEach(function (d, di) {
+      tracks.forEach(function (t, ti) {
+        var dist = Math.hypot(d.cx - t.cx, (d.cy - t.cy) * 1.5);
+        var sr = (d.w * d.h) / ((t.w * t.h) || 1e-6);
+        if (dist < 0.35 && sr > 0.3 && sr < 3.3) pairs.push({ di: di, ti: ti, dist: dist });
+      });
+    });
+    pairs.sort(function (a, b) { return a.dist - b.dist; });
+    var dUsed = {}, tUsed = {};
+    pairs.forEach(function (p) {
+      if (dUsed[p.di] || tUsed[p.ti]) return;
+      dUsed[p.di] = tUsed[p.ti] = true;
+      var t = tracks[p.ti], d = dets[p.di], prev = t.cx;
+      t.cx = d.cx; t.cy = d.cy; t.w = d.w; t.h = d.h; t.hits++; t.last = now; t.box = d.box;
+      if (!t.counted && t.hits >= 2 && (prev - 0.5) * (t.cx - 0.5) <= 0 && prev !== t.cx) { t.counted = true; this.onCount(t); }
+    }, this);
+    dets.forEach(function (d, di) {
+      if (dUsed[di]) return;
+      tracks.push({ id: this.nextId++, cx: d.cx, cy: d.cy, w: d.w, h: d.h, hits: 1, last: now, counted: false, box: d.box });
+    }, this);
+    this.tracks = tracks.filter(function (t) { return now - t.last < 1200; });
+  };
+  var carTracker = new Tracker(function () { state.cars++; save(); render(); vibrate(15); });
+  var meterTracker = new Tracker(function () { state.meters++; save(); render(); vibrate([10, 30, 10]); });
+
+  // ---------- Camera + model ----------
+  var model = null, running = false, paused = false, frames = 0, fpsT = performance.now();
+  function setStatus(m) { statusEl.textContent = m; statusEl.style.display = m ? "block" : "none"; }
+  setStatus(typeof cocoSsd === "undefined" ? "Detection library didn't load — check signal and reload." : "Tap Start camera");
+
+  $("startBtn").addEventListener("click", function () {
+    $("startErr").textContent = "";
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $("startErr").textContent = "Camera isn't available here. Open this page in Safari from the hosted link."; return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      .then(function (stream) {
+        video.srcObject = stream; return video.play();
+      })
+      .then(function () {
+        $("startCover").style.display = "none";
+        try { if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(function () {}); } catch (e) {}
+        startGps();
+        if (typeof cocoSsd === "undefined") { setStatus("Detection library didn't load — check signal and reload."); return; }
+        setStatus("Loading car detector (first time ~10 MB)…");
+        return cocoSsd.load({ base: "lite_mobilenet_v2" }).then(function (m) { model = m; setStatus(""); running = true; loop(); });
+      })
+      .catch(function (e) {
+        $("startErr").textContent = (e && e.name === "NotAllowedError") ? "Camera permission was denied. Allow it in Settings → Safari → Camera, then reload." : "Couldn't start: " + (e && e.message || e);
+      });
+  });
+
+  function loop() {
+    if (!running) return;
+    if (paused || video.readyState < 2) { requestAnimationFrame(loop); return; }
+    model.detect(video, 20, 0.45).then(function (preds) {
+      var vw = video.videoWidth, vh = video.videoHeight, now = performance.now();
+      var cars = [], meters = [];
+      preds.forEach(function (p) {
+        var b = p.bbox, d = { cx: (b[0] + b[2] / 2) / vw, cy: (b[1] + b[3] / 2) / vh, w: b[2] / vw, h: b[3] / vh, box: b, cls: p.class };
+        if (VEHICLES[p.class] && d.w > 0.08) cars.push(d);
+        else if (p.class === "parking meter") meters.push(d);
+      });
+      carTracker.update(cars, now); meterTracker.update(meters, now);
+      draw(vw, vh);
+      frames++; if (now - fpsT > 1000) { fpsEl.textContent = Math.round(frames * 1000 / (now - fpsT)) + " fps"; frames = 0; fpsT = now; }
+      requestAnimationFrame(loop);
+    }).catch(function () { requestAnimationFrame(loop); });
+  }
+
+  function draw(vw, vh) {
+    var r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, r.width, r.height);
+    var scale = Math.min(r.width / vw, r.height / vh), ox = (r.width - vw * scale) / 2, oy = (r.height - vh * scale) / 2;
+    $("centerLine").style.left = (ox + vw * scale / 2) + "px";
+    function boxes(tracks, color, label) {
+      tracks.forEach(function (t) {
+        if (!t.box) return;
+        var x = ox + t.box[0] * scale, y = oy + t.box[1] * scale, w = t.box[2] * scale, h = t.box[3] * scale;
+        ctx.lineWidth = 3; ctx.strokeStyle = t.counted ? "#5fbf72" : color; ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = t.counted ? "#5fbf72" : color; ctx.font = "bold 13px -apple-system, sans-serif";
+        ctx.fillText(label + (t.counted ? " ✓" : ""), x + 4, Math.max(14, y - 4));
+      });
+    }
+    boxes(carTracker.tracks, "#4fa3ff", "car"); boxes(meterTracker.tracks, "#ffb020", "meter");
+  }
+
+  $("pauseBtn").addEventListener("click", function () {
+    paused = !paused; this.textContent = paused ? "Resume" : "Pause";
+    if (paused) { setStatus("Paused — not counting"); } else setStatus("");
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".adj button"), function (b) {
+    b.addEventListener("click", function () {
+      var k = b.getAttribute("data-k"), d = +b.getAttribute("data-d");
+      state[k] = Math.max(0, state[k] + d); save(); render(); vibrate(8);
+    });
+  });
+
+  // ---------- GPS + street name ----------
+  var gps = { lat: null, lon: null, acc: null, street: "", geoAt: null, geoT: 0 };
+  function distM(a, b) { var R = 6371000, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lon - a.lon) * r;
+    var x = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) * Math.sin(dLo / 2); return 2 * R * Math.asin(Math.sqrt(x)); }
+  function renderGps(err) {
+    var dot = $("gpsDot"), t = $("gpsText");
+    if (err) { dot.className = "bad"; t.textContent = err; return; }
+    if (gps.lat == null) { dot.className = ""; t.textContent = "Finding GPS…"; return; }
+    dot.className = gps.acc * 3.281 <= 60 ? "ok" : "bad";
+    t.textContent = (gps.street || "Street loading…") + " · ±" + Math.round(gps.acc * 3.281) + " ft";
+  }
+  function startGps() {
+    if (!navigator.geolocation) { renderGps("No GPS available"); return; }
+    navigator.geolocation.watchPosition(function (p) {
+      gps.lat = p.coords.latitude; gps.lon = p.coords.longitude; gps.acc = p.coords.accuracy; renderGps();
+      var here = { lat: gps.lat, lon: gps.lon }, now = Date.now();
+      if (now - gps.geoT > 4000 && (!gps.geoAt || !gps.street || distM(gps.geoAt, here) > 20)) {
+        gps.geoT = now; gps.geoAt = here;
+        fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=" + here.lat.toFixed(6) + "&lon=" + here.lon.toFixed(6))
+          .then(function (r) { return r.json(); })
+          .then(function (j) { var road = j && j.address && (j.address.road || j.address.street); if (road) { gps.street = road; renderGps(); } })
+          .catch(function () {});
+      }
+    }, function (e) { renderGps(e && e.code === 1 ? "Location blocked — allow it in Safari settings" : "GPS unavailable"); },
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+  }
+
+  // ---------- Save / export ----------
+  $("saveBtn").addEventListener("click", function () {
+    var now = new Date(), pad = function (n) { return String(n).padStart(2, "0"); };
+    state.records.push({
+      uid: now.getTime(), street: gps.street || "", cars: state.cars, meters: state.meters,
+      lat: gps.lat, lon: gps.lon, date: now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()),
+      time: pad(now.getHours()) + ":" + pad(now.getMinutes())
+    });
+    var msg = "Saved " + state.cars + " cars" + (gps.street ? " · " + gps.street : "");
+    state.cars = 0; state.meters = 0; save(); render(); vibrate([15, 40, 15]); toast(msg);
+  });
+  function cell(v, sep) { v = v == null ? "" : String(v); if (sep === "\t") return v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function exportText(sep) {
+    var rows = [["Street", "Parked Cars", "Meters (beta)", "Date", "Time", "Latitude", "Longitude"]];
+    state.records.forEach(function (r) { rows.push([r.street, r.cars, r.meters, r.date, r.time, r.lat == null ? "" : r.lat.toFixed(6), r.lon == null ? "" : r.lon.toFixed(6)]); });
+    return rows.map(function (row) { return row.map(function (c) { return cell(c, sep); }).join(sep); }).join("\n");
+  }
+  function doExport(sep) {
+    if (!state.records.length) { toast("Nothing saved yet"); return; }
+    var text = exportText(sep), box = $("exportBox"); box.value = text;
+    try { navigator.clipboard.writeText(text).then(function () { box.style.display = "none"; toast("Copied"); }, function () { box.style.display = "block"; box.select(); toast("Long-press the box to copy"); }); }
+    catch (e) { box.style.display = "block"; box.select(); }
+  }
+  $("copyCsv").addEventListener("click", function () { doExport(","); });
+  $("copyTable").addEventListener("click", function () { doExport("\t"); });
+  function renderList() {
+    var list = $("recList"); list.innerHTML = "";
+    if (!state.records.length) { list.innerHTML = '<p style="color:var(--dim);text-align:center">Nothing saved yet.</p>'; return; }
+    state.records.slice().reverse().forEach(function (r) {
+      var d = document.createElement("div"); d.className = "rec";
+      var t = document.createElement("div"); t.className = "t";
+      var a = document.createElement("div"); a.className = "a"; a.textContent = r.street || "Unknown street";
+      var b = document.createElement("div"); b.className = "b"; b.textContent = r.date + " " + r.time + (r.meters ? " · " + r.meters + " meters" : "");
+      t.appendChild(a); t.appendChild(b);
+      var n = document.createElement("div"); n.className = "n"; n.textContent = r.cars + " 🚗";
+      d.appendChild(t); d.appendChild(n); list.appendChild(d);
+    });
+  }
+  $("logBtn").addEventListener("click", function () { renderList(); $("exportBox").style.display = "none"; $("panel").classList.add("open"); });
+  $("closePanel").addEventListener("click", function () { $("panel").classList.remove("open"); });
+  var clr = $("clearAll");
+  clr.addEventListener("click", function () {
+    if (!clr.classList.contains("armed")) { clr.classList.add("armed"); clr.textContent = "Tap again to delete all"; setTimeout(function () { clr.classList.remove("armed"); clr.textContent = "Clear all"; }, 3000); return; }
+    state.records = []; save(); render(); renderList(); clr.classList.remove("armed"); clr.textContent = "Clear all"; toast("Cleared");
+  });
+
+  // test hook (used only by automated tests)
+  window.__counterTest = { carTracker: carTracker, state: state };
+  render();
+})();
+</script>
+</body>
+</html>
