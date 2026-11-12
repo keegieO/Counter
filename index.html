@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Parking Tap Counter</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1110; --panel: #161a18; --line: #2a302d; --text: #f3f5f4; --dim: #8e9792;
+    --green: #3f7d4a; --green-hi: #5fbf72; --danger: #f06a6a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden; touch-action: manipulation;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+  header {
+    background: var(--green); padding: 10px 14px; display: flex; align-items: center;
+    justify-content: space-between; flex-shrink: 0; gap: 10px;
+  }
+  header h1 { margin: 0; font-size: 17px; font-weight: 700; }
+  .pill { background: rgba(255,255,255,0.16); color: #fff; border: 0; border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 700; white-space: nowrap; }
+
+  .idRow { display: flex; gap: 8px; padding: 10px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-shrink: 0; align-items: stretch; }
+  .idRow input {
+    min-width: 0; padding: 11px 12px; font-size: 17px; border-radius: 10px;
+    border: 1px solid var(--line); background: #0f1312; color: var(--text); outline: none;
+  }
+  .idRow input:focus { border-color: var(--green-hi); }
+  #idInput { flex: 0 0 22%; font-weight: 800; }
+  .seg { flex: 1; display: flex; gap: 6px; min-width: 0; }
+  .segBtn { flex: 1; border-radius: 10px; border: 2px solid var(--line); background: #1d2220; color: var(--dim); font-size: 14px; font-weight: 800; padding: 10px 2px; }
+  .segBtn.on { background: #f3f5f4; color: #0b0d10; border-color: #f3f5f4; }
+  #gpsBar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #101412; border-bottom: 1px solid var(--line); font-size: 14px; font-weight: 700; flex-shrink: 0; }
+  #gpsDot { width: 10px; height: 10px; border-radius: 50%; background: #8e9792; flex-shrink: 0; }
+  #gpsDot.ok { background: var(--green-hi); } #gpsDot.weak { background: #ffb020; } #gpsDot.bad { background: var(--danger); }
+  #gpsText { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #gpsAcc { color: var(--dim); font-size: 13px; flex-shrink: 0; }
+  #moreBtn { flex: 0 0 auto; border-radius: 10px; border: 1px solid var(--line); background: #1d2220; color: var(--text); font-size: 13px; font-weight: 700; padding: 0 10px; }
+  #moreBtn.has { border-color: var(--green-hi); color: var(--green-hi); }
+
+  #notesArea { display: none; padding: 0 12px 10px; background: var(--panel); border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  #notesArea.open { display: block; }
+  #notesArea input { width: 100%; margin-top: 8px; padding: 10px 12px; font-size: 15px; border-radius: 10px; border: 1px solid var(--line); background: #0f1312; color: var(--text); outline: none; }
+
+  #grid {
+    flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr;
+    gap: 8px; padding: 8px 10px; user-select: none; -webkit-user-select: none;
+  }
+  .tile {
+    border: 0; border-radius: 14px; color: #0b0d10; display: flex; flex-direction: column;
+    align-items: flex-start; justify-content: space-between; padding: 10px 12px; text-align: left;
+    transition: transform .07s, filter .07s; min-height: 0; overflow: hidden;
+  }
+  .tile:active { transform: scale(0.97); filter: brightness(0.9); }
+  .tile .lab { font-size: 15px; font-weight: 800; line-height: 1.15; }
+  .tile .num { font-size: clamp(34px, 11vh, 72px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; align-self: flex-end; }
+  .tile.zero .num { opacity: 0.35; }
+  .tile.bump { transform: scale(1.04); }
+  .tile.wide { grid-column: span 2; flex-direction: row; align-items: center; }
+
+  footer {
+    display: flex; gap: 10px; align-items: center; padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: var(--panel); border-top: 1px solid var(--line); flex-shrink: 0;
+  }
+  #undoBtn { flex: 0 0 auto; padding: 15px 14px; border-radius: 12px; border: 1px solid var(--line); background: #1d2220; color: var(--text); font-size: 15px; font-weight: 800; }
+  #total { flex: 0 0 auto; text-align: center; font-size: 12px; color: var(--dim); font-weight: 700; line-height: 1.1; min-width: 46px; }
+  #total b { display: block; font-size: 22px; color: var(--text); }
+  #saveBtn { flex: 1; padding: 15px 8px; border-radius: 12px; border: 1px solid var(--green-hi); background: var(--green-hi); color: #08130b; font-size: 16px; font-weight: 800; }
+  #undoBtn:active, #saveBtn:active { filter: brightness(.85); }
+
+  /* Saved panel */
+  #panel { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; z-index: 20; }
+  #panel.open { display: flex; }
+  .pbody { flex: 1; overflow-y: auto; padding: 12px 12px 30px; -webkit-overflow-scrolling: touch; }
+  .exportRow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .exportRow button { flex: 1; min-width: 130px; padding: 12px 8px; border-radius: 10px; border: 1px solid var(--line); background: #1d2220; color: var(--text); font-size: 14px; font-weight: 700; }
+  .exportRow button.primary { background: var(--green-hi); color: #08130b; border-color: var(--green-hi); }
+  .opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); margin: 4px 2px 10px; }
+  .opt input { width: 18px; height: 18px; }
+  #exportBox { width: 100%; height: 90px; margin: 0 0 12px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: #0f1312; color: var(--dim); font-family: ui-monospace, Menlo, monospace; font-size: 11px; display: none; }
+  .rec { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 12px; margin-bottom: 10px; }
+  .recTop { display: flex; align-items: center; gap: 8px; }
+  .recTop .t { flex: 1; min-width: 0; }
+  .recTop .id { font-size: 18px; font-weight: 800; }
+  .recTop .st { font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .recTop button { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: #1d2220; color: var(--text); font-size: 13px; font-weight: 700; }
+  .recTop button.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
+  .vals { margin-top: 8px; display: grid; grid-template-columns: 1fr auto; row-gap: 3px; column-gap: 10px; font-size: 14px; }
+  .vals .k { color: var(--dim); }
+  .vals .v { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+  .vals .v.z { color: #4b524e; font-weight: 600; }
+  .recNote { margin-top: 6px; font-size: 13px; color: var(--dim); }
+  .empty { color: var(--dim); text-align: center; padding: 30px 10px; font-size: 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin: 18px 0 8px; }
+  #clearAll.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+  #mapPanel { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; z-index: 25; }
+  #mapPanel.open { display: flex; }
+  #map { flex: 1; min-height: 0; background: #1a1f1d; }
+  #mapInfo { padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--panel); border-top: 1px solid var(--line); }
+  #mapMsg { font-size: 15px; font-weight: 700; margin-bottom: 8px; min-height: 20px; }
+  .mapBtns { display: flex; gap: 8px; }
+  .mapBtns button { padding: 14px 12px; border-radius: 12px; border: 1px solid var(--line); background: #1d2220; color: var(--text); font-size: 15px; font-weight: 800; }
+  .mapBtns button.go { flex: 1; background: var(--green-hi); border-color: var(--green-hi); color: #08130b; }
+  .mapBtns button:disabled { opacity: .4; }
+  #sumPanel { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; z-index: 30; padding: 18px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  #sumPanel.open { display: flex; }
+  #sumPanel .sh { font-size: 13px; font-weight: 800; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  #sumTitle { font-size: 22px; font-weight: 800; margin: 4px 0 14px; }
+  #sumRows { flex: 1; overflow-y: auto; }
+  .srow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px; border-radius: 12px; margin-bottom: 8px; color: #0b0d10; }
+  .srow .k { font-size: 16px; font-weight: 800; }
+  .srow .v { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .sumNote { font-size: 14px; color: var(--dim); margin: 6px 2px 12px; line-height: 1.4; }
+  .sumBtns { display: flex; gap: 10px; }
+  .sumBtns button { flex: 1; padding: 16px 8px; border-radius: 12px; font-size: 16px; font-weight: 800; border: 1px solid var(--line); background: #1d2220; color: var(--text); }
+  .sumBtns button.go { background: var(--green-hi); border-color: var(--green-hi); color: #08130b; flex: 1.4; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%) translateY(8px);
+    background: #222826; border: 1px solid var(--line); color: var(--text); padding: 10px 16px; border-radius: 999px;
+    font-size: 14px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50;
+    max-width: 92vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Blockface Count</h1>
+    <div style="display:flex;gap:6px">
+      <button class="pill" id="mapBtn">Map</button>
+      <button class="pill" id="logBtn">Saved (0) ▸</button>
+    </div>
+  </header>
+
+  <div id="gpsBar"><span id="gpsDot"></span><span id="gpsText">Starting GPS…</span><span id="gpsAcc"></span></div>
+  <div class="idRow">
+    <div class="seg">
+      <button class="segBtn" data-side="Left">Left curb</button>
+      <button class="segBtn" data-side="Right">Right curb</button>
+    </div>
+    <input id="idInput" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="ID">
+    <button id="moreBtn">More</button>
+  </div>
+  <div id="notesArea">
+    <input id="streetInput" type="text" autocomplete="off" placeholder="Street (only if GPS gets it wrong)">
+    <input id="regInput" type="text" autocomplete="off" placeholder="Other Regulation (e.g. 4hr 7a-6p)">
+    <input id="notesInput" type="text" autocomplete="off" placeholder="Inventory Notes">
+  </div>
+
+  <div id="grid"></div>
+
+  <footer>
+    <button id="undoBtn">Undo</button>
+    <div id="total">TOTAL<b>0</b></div>
+    <button id="saveBtn">Done ✓</button>
+  </footer>
+</div>
+
+<div id="panel">
+  <header>
+    <h1>Saved blockfaces</h1>
+    <button class="pill" id="closePanel">◂ Back</button>
+  </header>
+  <div class="pbody">
+    <div class="exportRow">
+      <button class="primary" id="copyCsv">Copy CSV</button>
+      <button id="copyTable">Copy for Excel</button>
+    </div>
+    <label class="opt"><input type="checkbox" id="zeroBlank"> Leave zero counts blank (matches "--" in the map)</label>
+    <textarea id="exportBox" readonly></textarea>
+    <div id="recList"></div>
+    <h2>Reset</h2>
+    <div class="exportRow"><button id="clearAll">Clear all saved blockfaces</button></div>
+  </div>
+</div>
+
+<div id="mapPanel">
+  <header>
+    <h1 id="mapTitle">Map</h1>
+    <div style="display:flex;gap:6px">
+      <button class="pill" id="loadRoads">Load roads here</button>
+      <button class="pill" id="closeMap">◂ Back</button>
+    </div>
+  </header>
+  <div id="map"></div>
+  <div id="mapInfo">
+    <div id="mapMsg">Tap a curb line to count it. Green = counted.</div>
+    <div class="mapBtns">
+      <button id="centerMe">◎ Me</button>
+      <button id="useCurb" class="go" disabled>Count this curb ▸</button>
+    </div>
+  </div>
+</div>
+
+<div id="sumPanel">
+  <div class="sh">Enter in Field Maps</div>
+  <div id="sumTitle"></div>
+  <div id="sumRows"></div>
+  <div class="sumNote">In Field Maps: tap this curb → Edit → type these numbers → Submit. Anything not listed stays blank.</div>
+  <div class="sumBtns">
+    <button id="sumBack">◂ Keep counting</button>
+    <button class="go" id="sumNext">Next blockface ▸</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  // Order and labels match the Field Maps form.
+  var CATS = [
+    { key: "meter",      label: "Meter",          field: "Spaces Meter",                     color: "#4fa3ff" },
+    { key: "loading",    label: "Loading",        field: "Spaces Loading (paid and unpaid)", color: "#ffb020" },
+    { key: "ada",        label: "ADA",            field: "Spaces ADA (paid and unpaid)",     color: "#2dd4bf" },
+    { key: "time",       label: "Time Limited",   field: "Spaces Time Limited (unpaid)",     color: "#5fbf72" },
+    { key: "unres",      label: "Unrestricted",   field: "Spaces Unrestricted",              color: "#b48cff" },
+    { key: "restricted", label: "Restricted Use", field: "Spaces Restricted Use (unpaid)",   color: "#f58a8a" },
+    { key: "other",      label: "Other",          field: "Spaces Other",                     color: "#a3acb6" }
+  ];
+  var KEY = "blockfaceCount_v3";
+
+  function blankCounts() { var c = {}; CATS.forEach(function (k) { c[k.key] = 0; }); return c; }
+  var state = { counts: blankCounts(), history: [], id: "", street: "", reg: "", notes: "", records: [], zeroBlank: true, side: "Right", curbId: "" };
+
+  // ---------- GPS ----------
+  var gps = { lat: null, lon: null, acc: null, heading: null, street: "", prev: null, geoAt: null, geoT: 0, err: "" };
+  function toRad(d) { return d * Math.PI / 180; }
+  function distM(a, b) {
+    var R = 6371000, dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+    var x = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(x));
+  }
+  function bearing(a, b) {
+    var y = Math.sin(toRad(b.lon - a.lon)) * Math.cos(toRad(b.lat));
+    var x = Math.cos(toRad(a.lat)) * Math.sin(toRad(b.lat)) - Math.sin(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.cos(toRad(b.lon - a.lon));
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+  function card8(d) { return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(((d % 360) + 360) % 360 / 45) % 8]; }
+  function card4(d) { return ["North", "East", "South", "West"][Math.round(((d % 360) + 360) % 360 / 90) % 4]; }
+  function curbLabel() {
+    var cc = currentCurb(); if (cc) return cc.side;
+    if (gps.heading == null) return state.side + " curb";
+    return card4(gps.heading + (state.side === "Right" ? 90 : -90)) + " side";
+  }
+  function currentStreet() {
+    var cc = currentCurb();
+    return (state.street || "").trim() || (cc && cc.street) || gps.street || "";
+  }
+
+  // ---------- Roads (OpenStreetMap) → curb lines ----------
+  var ROADS_KEY = "blockfaceRoads_v1";
+  var roads = { blocks: [], curbs: {}, center: null };
+  var picked = { auto: null };               // auto-picked curb id from GPS
+  function currentCurb() {
+    var id = state.curbId || picked.auto;
+    return id ? roads.curbs[id] || null : null;
+  }
+  function proj(lat0, lon0) {
+    var kx = Math.cos(toRad(lat0)) * 111320, ky = 110540;
+    return {
+      fwd: function (ll) { return [(ll[1] - lon0) * kx, (ll[0] - lat0) * ky]; },
+      inv: function (xy) { return [xy[1] / ky + lat0, xy[0] / kx + lon0]; }
+    };
+  }
+  function offsetLine(coords, d, P) {
+    var pts = coords.map(P.fwd), out = [];
+    for (var i = 0; i < pts.length; i++) {
+      var nx = 0, ny = 0;
+      [[i - 1, i], [i, i + 1]].forEach(function (s) {
+        if (s[0] < 0 || s[1] >= pts.length) return;
+        var dx = pts[s[1]][0] - pts[s[0]][0], dy = pts[s[1]][1] - pts[s[0]][1], L = Math.hypot(dx, dy) || 1;
+        nx += -dy / L; ny += dx / L;
+      });
+      var NL = Math.hypot(nx, ny) || 1;
+      out.push([pts[i][0] + nx / NL * d, pts[i][1] + ny / NL * d]);
+    }
+    // pull the ends back so curbs don't cross at intersections
+    function trim(a, b) {
+      var dx = a[0] - b[0], dy = a[1] - b[1], L = Math.hypot(dx, dy);
+      var t = Math.min(6, L / 3) / (L || 1); return [a[0] - dx * t, a[1] - dy * t];
+    }
+    if (out.length >= 2) { out[0] = trim(out[0], out[1]); out[out.length - 1] = trim(out[out.length - 1], out[out.length - 2]); }
+    return out.map(P.inv);
+  }
+  function buildRoads(data, center) {
+    var nodes = {}, uses = {}, ways = [];
+    data.elements.forEach(function (e) {
+      if (e.type === "node") nodes[e.id] = [e.lat, e.lon];
+      else if (e.type === "way") ways.push(e);
+    });
+    ways.forEach(function (w) { w.nodes.forEach(function (n, i) { uses[n] = (uses[n] || 0) + (i === 0 || i === w.nodes.length - 1 ? 2 : 1); }); });
+    var P = proj(center.lat, center.lon), blocks = [], curbs = {};
+    ways.forEach(function (w) {
+      var t = w.tags || {}, name = t.name || t.ref || "Unnamed road";
+      var seg = [], k = 0;
+      w.nodes.forEach(function (n, i) {
+        if (!nodes[n]) return;
+        seg.push(nodes[n]);
+        var cut = i > 0 && (uses[n] > 1 || i === w.nodes.length - 1);
+        if (cut && seg.length >= 2) {
+          var id = w.id + "-" + (k++), c = seg.slice();
+          var a = P.fwd(c[0]), b = P.fwd(c[c.length - 1]);
+          var len = 0; for (var j = 1; j < c.length; j++) { var p1 = P.fwd(c[j - 1]), p2 = P.fwd(c[j]); len += Math.hypot(p2[0] - p1[0], p2[1] - p1[1]); }
+          if (len >= 15) {
+            var brg = (Math.atan2(b[0] - a[0], b[1] - a[1]) * 180 / Math.PI + 360) % 360;
+            var L = { id: id + "L", block: id, street: name, side: card4(brg - 90) + " side", coords: offsetLine(c, 7, P) };
+            var R = { id: id + "R", block: id, street: name, side: card4(brg + 90) + " side", coords: offsetLine(c, -7, P) };
+            curbs[L.id] = L; curbs[R.id] = R;
+            blocks.push({ id: id, street: name, coords: c, curbs: [L.id, R.id] });
+          }
+          seg = [nodes[n]];
+        }
+      });
+    });
+    roads = { blocks: blocks, curbs: curbs, center: center };
+    try { localStorage.setItem(ROADS_KEY, JSON.stringify(roads)); } catch (e) {}
+  }
+  function loadSavedRoads() {
+    try { var r = JSON.parse(localStorage.getItem(ROADS_KEY) || "null"); if (r && r.curbs) roads = r; } catch (e) {}
+  }
+  function fetchRoads(lat, lon, done) {
+    var q = '[out:json][timeout:30];way["highway"~"^(primary|secondary|tertiary|residential|unclassified|living_street|primary_link|secondary_link|tertiary_link)$"](around:1500,' +
+      lat.toFixed(5) + ',' + lon.toFixed(5) + ');(._;>;);out body;';
+    fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (j) { buildRoads(j, { lat: lat, lon: lon }); done(null); })
+      .catch(function (e) { done(e || new Error("failed")); });
+  }
+  function distToLine(pt, coords, P) {
+    var p = P.fwd(pt), best = Infinity;
+    for (var i = 1; i < coords.length; i++) {
+      var a = P.fwd(coords[i - 1]), b = P.fwd(coords[i]), dx = b[0] - a[0], dy = b[1] - a[1];
+      var t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ((dx * dx + dy * dy) || 1); t = Math.max(0, Math.min(1, t));
+      var d = Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); if (d < best) best = d;
+    }
+    return best;
+  }
+  function autoPick() {
+    if (gps.lat == null || !roads.blocks.length) { picked.auto = null; return; }
+    var P = proj(gps.lat, gps.lon), here = [gps.lat, gps.lon], best = null, bd = 40;
+    roads.blocks.forEach(function (b) { var d = distToLine(here, b.coords, P); if (d < bd) { bd = d; best = b; } });
+    if (!best) { picked.auto = null; return; }
+    var want = gps.heading == null ? null : card4(gps.heading + (state.side === "Right" ? 90 : -90)) + " side";
+    var cs = best.curbs.map(function (id) { return roads.curbs[id]; });
+    var match = want && cs.filter(function (c) { return c.side === want; })[0];
+    if (!match) match = cs.slice().sort(function (a, b) { return distToLine(here, a.coords, P) - distToLine(here, b.coords, P); })[0];
+    picked.auto = match.id;
+  }
+  function renderGps() {
+    var dot = document.getElementById("gpsDot"), txt = document.getElementById("gpsText"), acc = document.getElementById("gpsAcc");
+    if (gps.err && state.curbId && currentCurb()) { dot.className = "weak"; txt.textContent = "📍 " + currentStreet() + " · " + curbLabel() + " (picked on map)"; acc.textContent = ""; return; }
+    if (gps.err) { dot.className = "bad"; txt.textContent = gps.err; acc.textContent = ""; return; }
+    if (gps.lat == null) { dot.className = ""; txt.textContent = "Finding GPS…"; acc.textContent = ""; return; }
+    var ft = Math.round(gps.acc * 3.281);
+    dot.className = ft <= 30 ? "ok" : ft <= 60 ? "weak" : "bad";
+    var st = (state.curbId ? "📍 " : "") + (currentStreet() || "Street loading…");
+    txt.textContent = st + " · " + curbLabel() + (gps.heading != null ? " · heading " + card8(gps.heading) : "");
+    acc.textContent = "±" + ft + " ft";
+  }
+  function maybeGeocode() {
+    var here = { lat: gps.lat, lon: gps.lon }, now = Date.now();
+    if (now - gps.geoT < 4000) return;
+    if (gps.geoAt && gps.street && distM(gps.geoAt, here) < 20) return;
+    gps.geoT = now; gps.geoAt = here;
+    try {
+      fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=" + here.lat.toFixed(6) + "&lon=" + here.lon.toFixed(6))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var road = j && j.address && (j.address.road || j.address.pedestrian || j.address.street);
+          if (road) { gps.street = road; renderGps(); }
+        }).catch(function () {});
+    } catch (e) {}
+  }
+  function startGps() {
+    if (!navigator.geolocation) { gps.err = "No GPS on this device/browser"; renderGps(); return; }
+    try {
+      navigator.geolocation.watchPosition(function (p) {
+        gps.err = "";
+        var c = p.coords, here = { lat: c.latitude, lon: c.longitude };
+        if (c.heading != null && !isNaN(c.heading) && (c.speed == null || c.speed > 1)) gps.heading = c.heading;
+        else if (gps.prev && distM(gps.prev, here) > 8) gps.heading = bearing(gps.prev, here);
+        if (!gps.prev || distM(gps.prev, here) > 8) gps.prev = here;
+        gps.lat = c.latitude; gps.lon = c.longitude; gps.acc = c.accuracy;
+        autoPick(); renderGps(); maybeGeocode(); updateMeOnMap();
+      }, function (e) {
+        gps.err = e && e.code === 1 ? "Location blocked — open the hosted link & allow location" : "GPS unavailable — still counting";
+        renderGps();
+      }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+    } catch (e) { gps.err = "GPS blocked here — use the hosted link"; renderGps(); }
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s && Array.isArray(s.records)) {
+          for (var k in state) if (s.hasOwnProperty(k)) state[k] = s[k];
+          var c = blankCounts(); for (var j in c) c[j] = Number(state.counts && state.counts[j]) || 0; state.counts = c;
+          if (!Array.isArray(state.history)) state.history = [];
+        }
+      }
+    } catch (e) {}
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var grid = $("grid"), idInput = $("idInput"), streetInput = $("streetInput"), regInput = $("regInput"), notesInput = $("notesInput");
+  var toastEl = $("toast"), logBtn = $("logBtn"), panel = $("panel"), recList = $("recList"), exportBox = $("exportBox");
+
+  function toast(msg) {
+    toastEl.textContent = msg; toastEl.classList.add("show");
+    clearTimeout(toastEl._t); toastEl._t = setTimeout(function () { toastEl.classList.remove("show"); }, 1700);
+  }
+  function vibrate(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+  function copyText(text, ok, fail) {
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(ok || function () {}).catch(fail || function () {}); return; } } catch (e) {}
+    if (fail) fail();
+  }
+
+  // Build tiles
+  var tiles = {};
+  CATS.forEach(function (c, i) {
+    var b = document.createElement("button");
+    b.className = "tile" + (i === CATS.length - 1 && CATS.length % 2 === 1 ? " wide" : "");
+    b.style.background = c.color;
+    b.innerHTML = '<span class="lab"></span><span class="num">0</span>';
+    b.querySelector(".lab").textContent = c.label;
+    b.addEventListener("click", function () {
+      if (document.activeElement && document.activeElement.tagName === "INPUT") document.activeElement.blur();
+      state.counts[c.key] += 1; state.history.push(c.key);
+      save(); render(); vibrate(12);
+      b.classList.remove("bump"); void b.offsetWidth; b.classList.add("bump");
+      setTimeout(function () { b.classList.remove("bump"); }, 90);
+    });
+    grid.appendChild(b); tiles[c.key] = b;
+  });
+
+  function total(counts) { var t = 0; CATS.forEach(function (c) { t += counts[c.key]; }); return t; }
+  function render() {
+    CATS.forEach(function (c) {
+      var n = state.counts[c.key];
+      tiles[c.key].querySelector(".num").textContent = n;
+      tiles[c.key].classList.toggle("zero", n === 0);
+    });
+    $("total").innerHTML = "TOTAL<b>" + total(state.counts) + "</b>";
+    if (idInput.value !== state.id) idInput.value = state.id;
+    if (streetInput.value !== state.street) streetInput.value = state.street;
+    if (regInput.value !== state.reg) regInput.value = state.reg;
+    if (notesInput.value !== state.notes) notesInput.value = state.notes;
+    $("moreBtn").classList.toggle("has", !!(state.reg || state.notes || state.street));
+    var segs = document.querySelectorAll(".segBtn");
+    for (var s = 0; s < segs.length; s++) segs[s].classList.toggle("on", segs[s].getAttribute("data-side") === state.side);
+    renderGps();
+    logBtn.textContent = "Saved (" + state.records.length + ") ▸";
+  }
+
+  idInput.addEventListener("input", function () { state.id = idInput.value.trim(); save(); });
+  streetInput.addEventListener("input", function () { state.street = streetInput.value; save(); render(); });
+  var segBtns = document.querySelectorAll(".segBtn");
+  for (var sb = 0; sb < segBtns.length; sb++) segBtns[sb].addEventListener("click", function () {
+    state.side = this.getAttribute("data-side"); autoPick(); save(); render(); vibrate(6);
+  });
+  regInput.addEventListener("input", function () { state.reg = regInput.value; save(); render(); });
+  notesInput.addEventListener("input", function () { state.notes = notesInput.value; save(); render(); });
+  [idInput, streetInput, regInput, notesInput].forEach(function (el) {
+    el.addEventListener("keydown", function (e) { if (e.key === "Enter") el.blur(); });
+  });
+  $("moreBtn").addEventListener("click", function () { $("notesArea").classList.toggle("open"); });
+
+  $("undoBtn").addEventListener("click", function () {
+    var k = state.history.pop();
+    if (!k) { toast("Nothing to undo"); return; }
+    if (state.counts[k] > 0) state.counts[k] -= 1;
+    save(); render(); vibrate(8);
+    var cat = CATS.filter(function (c) { return c.key === k; })[0];
+    toast("Undid 1 " + cat.label);
+  });
+
+  // Done → show the numbers to type into Field Maps
+  var sumPanel = $("sumPanel");
+  $("saveBtn").addEventListener("click", function () {
+    if (document.activeElement && document.activeElement.tagName === "INPUT") document.activeElement.blur();
+    var id = idInput.value.trim(), street = currentStreet();
+    $("sumTitle").textContent = (street || "This blockface") + " · " + curbLabel() + (id ? " · #" + id : "") + " — " + total(state.counts) + " spaces";
+    var rows = $("sumRows"); rows.innerHTML = "";
+    var any = false;
+    CATS.forEach(function (c) {
+      var n = state.counts[c.key]; if (!n) return; any = true;
+      var r = document.createElement("div"); r.className = "srow"; r.style.background = c.color;
+      var k = document.createElement("div"); k.className = "k"; k.textContent = c.field;
+      var v = document.createElement("div"); v.className = "v"; v.textContent = n;
+      r.appendChild(k); r.appendChild(v); rows.appendChild(r);
+    });
+    if (!any) rows.innerHTML = '<div class="empty">No spaces counted on this blockface.</div>';
+    sumPanel.classList.add("open");
+  });
+  $("sumBack").addEventListener("click", function () { sumPanel.classList.remove("open"); });
+
+  $("sumNext").addEventListener("click", function () {
+    sumPanel.classList.remove("open");
+    var id = idInput.value.trim();
+    var now = new Date(), pad = function (n) { return String(n).padStart(2, "0"); };
+    var rec = {
+      uid: now.getTime() + "-" + Math.random().toString(36).slice(2, 7),
+      id: id, street: currentStreet(), reg: regInput.value.trim(), notes: notesInput.value.trim(),
+      side: state.side, curb: curbLabel(), curbId: (currentCurb() || {}).id || "",
+      lat: gps.lat, lon: gps.lon, acc: gps.acc == null ? null : Math.round(gps.acc * 3.281),
+      counts: JSON.parse(JSON.stringify(state.counts)),
+      date: now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()),
+      time: pad(now.getHours()) + ":" + pad(now.getMinutes())
+    };
+    // Re-saving the same BlockfaceID replaces the earlier entry.
+    var replaced = false;
+    if (id) state.records = state.records.filter(function (r) { if (r.id === id) { replaced = true; return false; } return true; });
+    state.records.push(rec);
+    state.counts = blankCounts(); state.history = []; state.id = ""; state.street = ""; state.reg = ""; state.notes = ""; state.curbId = "";
+    drawCurbs();
+    $("notesArea").classList.remove("open");
+    save(); render(); vibrate([15, 40, 15]);
+    toast((replaced ? "Updated " : "Logged ") + (rec.id ? "#" + rec.id : "blockface") + " · " + total(rec.counts) + " spaces");
+  });
+
+  // Export
+  function cell(v, sep) { v = String(v); if (sep === "\t") return v.replace(/[\t\n]/g, " "); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function buildExport(sep) {
+    var head = ["BlockfaceID", "Street Name", "Curb"].concat(CATS.map(function (c) { return c.field; }))
+      .concat(["Other Regulation", "Inventory Notes", "Inventory Reviewed?", "Count Date", "Count Time", "Latitude", "Longitude", "GPS Accuracy (ft)"]);
+    var rows = [head];
+    state.records.forEach(function (r) {
+      var row = [r.id, r.street, r.curb || ""];
+      CATS.forEach(function (c) { var n = r.counts[c.key] || 0; row.push(n === 0 && state.zeroBlank ? "" : n); });
+      row.push(r.reg || "", r.notes || "", "Yes", r.date, r.time,
+        r.lat == null ? "" : r.lat.toFixed(6), r.lon == null ? "" : r.lon.toFixed(6), r.acc == null ? "" : r.acc);
+      rows.push(row);
+    });
+    return rows.map(function (row) { return row.map(function (v) { return cell(v, sep); }).join(sep); }).join("\n");
+  }
+  function doExport(sep, label) {
+    if (!state.records.length) { toast("Nothing saved yet"); return; }
+    var text = buildExport(sep); exportBox.value = text;
+    copyText(text, function () { exportBox.style.display = "none"; toast(label + " copied (" + state.records.length + " blockfaces)"); },
+      function () { exportBox.style.display = "block"; exportBox.focus(); exportBox.select(); toast("Long-press the box to copy"); });
+  }
+  $("copyCsv").addEventListener("click", function () { doExport(",", "CSV"); });
+  $("copyTable").addEventListener("click", function () { doExport("\t", "Table"); });
+  $("zeroBlank").addEventListener("change", function () { state.zeroBlank = this.checked; save(); });
+
+  function renderList() {
+    recList.innerHTML = "";
+    if (!state.records.length) { recList.innerHTML = '<div class="empty">Nothing logged yet. Tap the tiles to count, then Done → Next blockface.</div>'; return; }
+    for (var i = state.records.length - 1; i >= 0; i--) (function (r) {
+      var box = document.createElement("div"); box.className = "rec";
+      var top = document.createElement("div"); top.className = "recTop";
+      var t = document.createElement("div"); t.className = "t";
+      var idEl = document.createElement("div"); idEl.className = "id"; idEl.textContent = (r.id ? "#" + r.id : "No ID") + " · " + total(r.counts) + " spaces";
+      var st = document.createElement("div"); st.className = "st"; st.textContent = [r.street, r.curb].filter(Boolean).join(" · ") + (r.street || r.curb ? " · " : "") + r.date + " " + r.time;
+      t.appendChild(idEl); t.appendChild(st);
+      var edit = document.createElement("button"); edit.textContent = "Edit";
+      edit.addEventListener("click", function () {
+        state.id = r.id; state.street = r.curbId ? "" : r.street; state.curbId = r.curbId || ""; state.reg = r.reg || ""; state.notes = r.notes || "";
+        state.counts = JSON.parse(JSON.stringify(r.counts)); state.history = [];
+        save(); render(); panel.classList.remove("open");
+        if (state.reg || state.notes) $("notesArea").classList.add("open");
+        toast("Editing " + (r.id ? "#" + r.id : "entry") + " — tap Done to update it");
+      });
+      var del = document.createElement("button"); del.textContent = "✕";
+      del.addEventListener("click", function () {
+        if (!del.classList.contains("armed")) { del.classList.add("armed"); del.textContent = "Delete?";
+          setTimeout(function () { del.classList.remove("armed"); del.textContent = "✕"; }, 2500); return; }
+        state.records = state.records.filter(function (x) { return x.uid !== r.uid; }); save(); render(); renderList();
+      });
+      top.appendChild(t); top.appendChild(edit); top.appendChild(del); box.appendChild(top);
+      var vals = document.createElement("div"); vals.className = "vals";
+      CATS.forEach(function (c) {
+        var k = document.createElement("div"); k.className = "k"; k.textContent = c.field;
+        var v = document.createElement("div"); var n = r.counts[c.key] || 0;
+        v.className = "v" + (n === 0 ? " z" : ""); v.textContent = n === 0 ? "--" : n;
+        vals.appendChild(k); vals.appendChild(v);
+      });
+      box.appendChild(vals);
+      if (r.reg || r.notes) { var nt = document.createElement("div"); nt.className = "recNote"; nt.textContent = [r.reg, r.notes].filter(Boolean).join(" · "); box.appendChild(nt); }
+      recList.appendChild(box);
+    })(state.records[i]);
+  }
+  logBtn.addEventListener("click", function () { exportBox.style.display = "none"; $("zeroBlank").checked = !!state.zeroBlank; renderList(); panel.classList.add("open"); });
+  $("closePanel").addEventListener("click", function () { panel.classList.remove("open"); });
+
+  var clearBtn = $("clearAll");
+  clearBtn.addEventListener("click", function () {
+    if (!clearBtn.classList.contains("armed")) { clearBtn.classList.add("armed"); clearBtn.textContent = "Tap again to delete everything";
+      setTimeout(function () { clearBtn.classList.remove("armed"); clearBtn.textContent = "Clear all saved blockfaces"; }, 3000); return; }
+    state.records = []; clearBtn.classList.remove("armed"); clearBtn.textContent = "Clear all saved blockfaces";
+    save(); render(); renderList(); toast("All saved blockfaces cleared");
+  });
+
+
+  // ---------- Map ----------
+  var map = null, curbLayer = null, meMarker = null, meCircle = null, selected = null, curbLines = {};
+  var mapPanel = $("mapPanel"), mapMsg = $("mapMsg"), useCurb = $("useCurb");
+  function countedIds() { var s = {}; state.records.forEach(function (r) { if (r.curbId) s[r.curbId] = true; }); return s; }
+  function curbStyle(id, done) {
+    if (id === selected) return { color: "#ffd84d", weight: 9, opacity: 1 };
+    if (id === (state.curbId || picked.auto)) return { color: done[id] ? "#3fbf5a" : "#4fa3ff", weight: 9, opacity: 1 };
+    return done[id] ? { color: "#3fbf5a", weight: 6, opacity: 0.95 } : { color: "#e0605a", weight: 5, opacity: 0.85 };
+  }
+  function drawCurbs() {
+    if (!map) return;
+    var done = countedIds(), n = 0;
+    if (curbLayer) curbLayer.remove();
+    curbLayer = L.layerGroup().addTo(map); curbLines = {};
+    Object.keys(roads.curbs).forEach(function (id) {
+      var c = roads.curbs[id];
+      var line = L.polyline(c.coords, curbStyle(id, done)).addTo(curbLayer);
+      line.on("click", function () { selectCurb(id); });
+      curbLines[id] = line; if (done[id]) n++;
+    });
+    $("mapTitle").textContent = Object.keys(roads.curbs).length ? n + " counted" : "Map";
+  }
+  function restyle() { var done = countedIds(); Object.keys(curbLines).forEach(function (id) { curbLines[id].setStyle(curbStyle(id, done)); }); }
+  function selectCurb(id) {
+    selected = id; var c = roads.curbs[id]; restyle();
+    var rec = state.records.filter(function (r) { return r.curbId === id; })[0];
+    mapMsg.textContent = c.street + " · " + c.side + (rec ? " · counted " + total(rec.counts) + " ✓" : "");
+    useCurb.disabled = false; useCurb.textContent = rec ? "Recount this curb ▸" : "Count this curb ▸";
+  }
+  function updateMeOnMap() {
+    if (!map || gps.lat == null) return;
+    var ll = [gps.lat, gps.lon];
+    if (!meMarker) {
+      meCircle = L.circle(ll, { radius: gps.acc || 10, color: "#4fa3ff", weight: 1, fillOpacity: 0.12 }).addTo(map);
+      meMarker = L.circleMarker(ll, { radius: 8, color: "#fff", weight: 3, fillColor: "#2f80ff", fillOpacity: 1 }).addTo(map);
+    } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll); meCircle.setRadius(gps.acc || 10); }
+    restyle();
+  }
+  function initMap() {
+    if (map) return true;
+    if (typeof L === "undefined") { mapMsg.textContent = "Map library didn't load — check your connection."; return false; }
+    var start = gps.lat != null ? [gps.lat, gps.lon] : roads.center ? [roads.center.lat, roads.center.lon] : [39.7684, -86.1581];
+    map = L.map("map", { zoomControl: false, attributionControl: true }).setView(start, 17);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      maxZoom: 20, subdomains: "abcd", attribution: "© OpenStreetMap contributors © CARTO"
+    }).addTo(map);
+    drawCurbs(); updateMeOnMap();
+    return true;
+  }
+  function loadHere(lat, lon) {
+    mapMsg.textContent = "Loading roads…"; $("loadRoads").disabled = true;
+    fetchRoads(lat, lon, function (err) {
+      $("loadRoads").disabled = false;
+      if (err) { mapMsg.textContent = "Couldn't load roads here (needs the hosted link + signal). Try again in a bit."; return; }
+      autoPick(); drawCurbs(); render();
+      mapMsg.textContent = Object.keys(roads.curbs).length + " curbs loaded. Tap one to count it. Green = counted.";
+    });
+  }
+  $("mapBtn").addEventListener("click", function () {
+    mapPanel.classList.add("open");
+    if (!initMap()) return;
+    setTimeout(function () { map.invalidateSize(); if (gps.lat != null) map.setView([gps.lat, gps.lon], Math.max(map.getZoom(), 17)); }, 50);
+    selected = null; useCurb.disabled = true; useCurb.textContent = "Count this curb ▸"; drawCurbs();
+    if (!Object.keys(roads.curbs).length) {
+      if (gps.lat != null) loadHere(gps.lat, gps.lon);
+      else mapMsg.textContent = "Pan to your area and tap “Load roads here”.";
+    } else mapMsg.textContent = "Tap a curb line to count it. Blue = current, green = counted.";
+  });
+  $("closeMap").addEventListener("click", function () { mapPanel.classList.remove("open"); });
+  $("loadRoads").addEventListener("click", function () { if (!initMap()) return; var c = map.getCenter(); loadHere(c.lat, c.lng); });
+  $("centerMe").addEventListener("click", function () { if (map && gps.lat != null) map.setView([gps.lat, gps.lon], 18); });
+  useCurb.addEventListener("click", function () {
+    if (!selected) return;
+    state.curbId = selected; state.street = "";
+    var rec = state.records.filter(function (r) { return r.curbId === selected; })[0];
+    if (rec) { state.counts = JSON.parse(JSON.stringify(rec.counts)); state.history = []; state.id = rec.id || ""; }
+    save(); render(); mapPanel.classList.remove("open");
+    toast((rec ? "Recounting " : "Counting ") + roads.curbs[selected].street + " · " + roads.curbs[selected].side);
+  });
+
+  load(); loadSavedRoads(); render(); startGps();
+})();
+</script>
+</body>
+</html>
